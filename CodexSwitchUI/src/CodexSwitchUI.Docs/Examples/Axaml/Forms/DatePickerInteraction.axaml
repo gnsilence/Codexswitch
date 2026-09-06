@@ -1,0 +1,76 @@
+<Grid xmlns="https://github.com/avaloniaui"
+      xmlns:controls="using:CodexSwitchUI.Controls"
+      ColumnDefinitions="*,*"
+      RowDefinitions="Auto,Auto"
+      ColumnSpacing="16"
+      RowSpacing="14">
+  <controls:CodexField Label="Keyboard open"
+                       Description="Enter, Space, and ArrowDown open; Escape closes with source metadata.">
+    <StackPanel Spacing="8">
+      <controls:CodexDatePicker DisplayDate="2026-05-01"
+                                SelectedDate="2026-05-13"
+                                CloseOnSelect="False"
+                                MinWidth="280"
+                                HorizontalAlignment="Left" />
+      <TextBlock Text="OpenChanged: picker starts closed; use ArrowDown to open."
+                 Opacity="0.72" />
+      <StackPanel Orientation="Horizontal"
+                  Spacing="8">
+        <controls:CodexButton Content="ArrowDown"
+                              Size="Small"
+                              Variant="Secondary" />
+        <controls:CodexButton Content="Escape"
+                              Size="Small"
+                              Variant="Ghost" />
+      </StackPanel>
+    </StackPanel>
+  </controls:CodexField>
+
+  <controls:CodexField Grid.Column="1"
+                       Label="Range completion"
+                       Description="Second date completes the range, reports source, and can close the popover.">
+    <StackPanel Spacing="8">
+      <controls:CodexDatePicker DisplayDate="2026-02-01"
+                                SelectionMode="Range"
+                                RangeStart="2026-02-09"
+                                MinWidth="280"
+                                HorizontalAlignment="Left" />
+      <TextBlock Text="RangeChanged: waiting for the second date."
+                 Opacity="0.72" />
+      <StackPanel Orientation="Horizontal"
+                  Spacing="8">
+        <controls:CodexButton Content="Open range"
+                              Size="Small"
+                              Variant="Secondary" />
+        <controls:CodexButton Content="Finish range"
+                              Size="Small"
+                              Variant="Outline" />
+      </StackPanel>
+    </StackPanel>
+  </controls:CodexField>
+
+  <controls:CodexField Grid.Row="1"
+                       Label="Clear reset"
+                       Description="Backspace, Delete, and the clear action reset selection state.">
+    <controls:CodexDatePicker DisplayDate="2026-07-01"
+                              SelectedDate="2026-07-09"
+                              IsClearVisible="True"
+                              MinWidth="280"
+                              HorizontalAlignment="Left" />
+  </controls:CodexField>
+
+  <controls:CodexField Grid.Row="1"
+                       Grid.Column="1"
+                       Label="Guarded selection"
+                       Description="Disabled bounds and loading prevent changes through the same path."
+                       Intent="Error">
+    <controls:CodexDatePicker DisplayDate="2026-08-01"
+                              SelectedDate="2026-08-18"
+                              MinDate="2026-08-10"
+                              MaxDate="2026-08-24"
+                              IsLoading="True"
+                              Intent="Error"
+                              MinWidth="280"
+                              HorizontalAlignment="Left" />
+  </controls:CodexField>
+</Grid>

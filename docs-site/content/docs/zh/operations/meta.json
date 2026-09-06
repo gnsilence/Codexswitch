@@ -1,0 +1,12 @@
+{
+  "title": "Operations",
+  "pages": [
+    "index",
+    "release-guide",
+    "ci-flow",
+    "macos-signing-and-notarization",
+    "update-checks",
+    "troubleshooting",
+    "security-model"
+  ]
+}

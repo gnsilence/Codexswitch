@@ -1,0 +1,31 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CodexSwitch.ViewModels"
+             xmlns:ui="using:CodexSwitchUI.Controls"
+             xmlns:i18n="using:CodexSwitch.I18n"
+             xmlns:lucide="using:Lucide.Avalonia"
+             x:Class="CodexSwitch.Views.Shell.TopBar"
+             x:DataType="vm:MainWindowViewModel">
+    <Border Classes="top-bar">
+        <StackPanel Orientation="Horizontal"
+                    Spacing="8"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center">
+            <ui:CodexBadge Variant="Outline"
+                           VerticalAlignment="Center">
+                <TextBlock Text="{Binding Endpoint}"
+                           FontSize="12"
+                           MaxWidth="320"
+                           TextTrimming="CharacterEllipsis"/>
+            </ui:CodexBadge>
+            <ui:CodexIconButton Command="{Binding ToggleProxyCommand}"
+                                ToolTip.Tip="{Binding ServiceStateText}">
+                <lucide:LucideIcon Kind="Power" Size="17" StrokeWidth="2"/>
+            </ui:CodexIconButton>
+            <ui:CodexIconButton Command="{Binding RefreshUsageCommand}"
+                                ToolTip.Tip="{i18n:Tr common.refresh}">
+                <lucide:LucideIcon Kind="RefreshCw" Size="16" StrokeWidth="2"/>
+            </ui:CodexIconButton>
+        </StackPanel>
+    </Border>
+</UserControl>

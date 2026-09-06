@@ -1,0 +1,576 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:CodexSwitchUI.Controls">
+  <Style Selector="controls|CodexTable">
+    <Setter Property="FontFamily" Value="{DynamicResource CodexSwitch.FontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource CodexSwitch.FontSizeMd}" />
+    <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.ForegroundBrush}" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="Foreground" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border x:Name="PART_TableSurface"
+                Background="{DynamicResource CodexSwitch.CardBrush}"
+                BorderBrush="{DynamicResource CodexSwitch.BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="{DynamicResource CodexSwitch.RadiusLg}">
+          <Border.Transitions>
+            <Transitions>
+              <BrushTransition Property="Background" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+              <BrushTransition Property="BorderBrush" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+            </Transitions>
+          </Border.Transitions>
+          <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Disabled">
+            <ContentPresenter x:Name="PART_TableContent"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}" />
+          </ScrollViewer>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable">
+    <Setter Property="FontFamily" Value="{DynamicResource CodexSwitch.FontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource CodexSwitch.FontSizeMd}" />
+    <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.ForegroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.CardBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource CodexSwitch.BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource CodexSwitch.RadiusLg}" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="Background" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="Foreground" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="BorderBrush" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate TargetType="controls:CodexPinnedTable">
+        <Border x:Name="PART_TableSurface"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}"
+                ClipToBounds="True">
+          <Grid RowDefinitions="Auto,*">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="{TemplateBinding StartColumnWidth}" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="{TemplateBinding EndColumnWidth}" />
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="PART_StartHeader"
+                    Background="{DynamicResource CodexSwitch.MutedBrush}"
+                    BorderBrush="{DynamicResource CodexSwitch.BorderBrush}"
+                    BorderThickness="0,0,1,1"
+                    MinHeight="{TemplateBinding HeaderHeight}">
+              <ContentPresenter Content="{TemplateBinding StartHeader}"
+                                ContentTemplate="{TemplateBinding StartHeaderTemplate}"
+                                VerticalAlignment="Center" />
+            </Border>
+
+            <ScrollViewer x:Name="PART_HeaderScrollViewer"
+                          Grid.Column="1"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled"
+                          AllowAutoHide="True"
+                          IsHitTestVisible="False">
+              <Border x:Name="PART_MiddleHeader"
+                      Background="{DynamicResource CodexSwitch.MutedBrush}"
+                      BorderBrush="{DynamicResource CodexSwitch.BorderBrush}"
+                      BorderThickness="0,0,0,1"
+                      MinHeight="{TemplateBinding HeaderHeight}">
+                <ContentPresenter x:Name="PART_MiddleHeaderContent"
+                                  MinWidth="{TemplateBinding MiddleMinWidth}"
+                                  Content="{TemplateBinding MiddleHeader}"
+                                  ContentTemplate="{TemplateBinding MiddleHeaderTemplate}"
+                                  VerticalAlignment="Center" />
+              </Border>
+            </ScrollViewer>
+
+            <Border x:Name="PART_EndHeader"
+                    Grid.Column="2"
+                    Background="{DynamicResource CodexSwitch.MutedBrush}"
+                    BorderBrush="{DynamicResource CodexSwitch.BorderBrush}"
+                    BorderThickness="1,0,0,1"
+                    MinHeight="{TemplateBinding HeaderHeight}">
+              <ContentPresenter Content="{TemplateBinding EndHeader}"
+                                ContentTemplate="{TemplateBinding EndHeaderTemplate}"
+                                VerticalAlignment="Center" />
+            </Border>
+
+            <ItemsControl x:Name="PART_StartItemsControl"
+                          Grid.Row="1"
+                          RenderTransformOrigin="50%,50%"
+                          ItemsSource="{TemplateBinding ItemsSource}"
+                          ItemTemplate="{TemplateBinding StartCellTemplate}">
+              <ItemsControl.RenderTransform>
+                <TranslateTransform />
+              </ItemsControl.RenderTransform>
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+
+            <ScrollViewer x:Name="PART_BodyScrollViewer"
+                          Grid.Row="1"
+                          Grid.Column="1"
+                          RenderTransformOrigin="50%,50%"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled"
+                          AllowAutoHide="True">
+              <ScrollViewer.RenderTransform>
+                <TranslateTransform />
+              </ScrollViewer.RenderTransform>
+              <ItemsControl x:Name="PART_MiddleItemsControl"
+                            MinWidth="{TemplateBinding MiddleMinWidth}"
+                            ItemsSource="{TemplateBinding ItemsSource}"
+                            ItemTemplate="{TemplateBinding MiddleCellTemplate}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+              </ItemsControl>
+            </ScrollViewer>
+
+            <ItemsControl x:Name="PART_EndItemsControl"
+                          Grid.Row="1"
+                          Grid.Column="2"
+                          RenderTransformOrigin="50%,50%"
+                          ItemsSource="{TemplateBinding ItemsSource}"
+                          ItemTemplate="{TemplateBinding EndCellTemplate}">
+              <ItemsControl.RenderTransform>
+                <TranslateTransform />
+              </ItemsControl.RenderTransform>
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+
+            <Border x:Name="PART_LoadingBar"
+                    Grid.RowSpan="2"
+                    Grid.ColumnSpan="3"
+                    Height="2"
+                    Background="{DynamicResource CodexSwitch.PrimaryBrush}"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Top"
+                    Opacity="0"
+                    IsHitTestVisible="False" />
+          </Grid>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable /template/ Border#PART_TableSurface">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="BorderBrush" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable /template/ Border#PART_LoadingBar">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="{DynamicResource CodexSwitch.MotionDurationFast}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable.loading /template/ Border#PART_LoadingBar">
+    <Setter Property="Opacity" Value="0.92" />
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable.compact">
+    <Setter Property="HeaderHeight" Value="36" />
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable controls|CodexTableRow:pointerover /template/ Border#PART_RowRoot">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.AccentBrush}" />
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable.compact controls|CodexTableRow">
+    <Setter Property="MinHeight" Value="36" />
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable.compact controls|CodexTableHead">
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
+  <Style Selector="controls|CodexPinnedTable.compact controls|CodexTableCell">
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
+  <Style Selector="controls|CodexTable /template/ ScrollViewer, controls|CodexPinnedTable /template/ ScrollViewer">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ScrollViewer">
+        <Grid x:Name="PART_ScrollRoot"
+              ColumnDefinitions="*,Auto"
+              RowDefinitions="*,Auto"
+              Background="{TemplateBinding Background}">
+          <ScrollContentPresenter x:Name="PART_ContentPresenter"
+                                  Grid.RowSpan="2"
+                                  Grid.ColumnSpan="2"
+                                  Padding="{TemplateBinding Padding}"
+                                  Background="{TemplateBinding Background}"
+                                  HorizontalSnapPointsAlignment="{TemplateBinding HorizontalSnapPointsAlignment}"
+                                  HorizontalSnapPointsType="{TemplateBinding HorizontalSnapPointsType}"
+                                  ScrollViewer.IsScrollInertiaEnabled="{TemplateBinding IsScrollInertiaEnabled}"
+                                  VerticalSnapPointsAlignment="{TemplateBinding VerticalSnapPointsAlignment}"
+                                  VerticalSnapPointsType="{TemplateBinding VerticalSnapPointsType}">
+            <ScrollContentPresenter.GestureRecognizers>
+              <ScrollGestureRecognizer CanHorizontallyScroll="{Binding CanHorizontallyScroll, ElementName=PART_ContentPresenter}"
+                                       CanVerticallyScroll="{Binding CanVerticallyScroll, ElementName=PART_ContentPresenter}"
+                                       IsScrollInertiaEnabled="{Binding (ScrollViewer.IsScrollInertiaEnabled), ElementName=PART_ContentPresenter}" />
+            </ScrollContentPresenter.GestureRecognizers>
+          </ScrollContentPresenter>
+
+          <ScrollBar x:Name="PART_HorizontalScrollBar"
+                     Grid.Row="1"
+                     Grid.Column="0"
+                     Orientation="Horizontal" />
+
+          <ScrollBar x:Name="PART_VerticalScrollBar"
+                     Grid.Row="0"
+                     Grid.Column="1"
+                     Orientation="Vertical" />
+
+          <Border x:Name="PART_Corner"
+                  Grid.Row="1"
+                  Grid.Column="1"
+                  Background="Transparent" />
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTable /template/ ScrollViewer ScrollBar, controls|CodexPinnedTable /template/ ScrollViewer ScrollBar">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.MutedForegroundBrush}" />
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="Foreground" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTable /template/ ScrollViewer ScrollBar:vertical, controls|CodexPinnedTable /template/ ScrollViewer ScrollBar:vertical">
+    <Setter Property="Width" Value="10" />
+    <Setter Property="MinWidth" Value="10" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ScrollBar">
+        <Border x:Name="PART_ScrollBarRoot"
+                Width="{TemplateBinding Width}"
+                MinWidth="{TemplateBinding MinWidth}"
+                Background="Transparent"
+                Padding="3,2">
+          <Track x:Name="PART_Track"
+                 Orientation="{TemplateBinding Orientation}"
+                 IsDirectionReversed="True"
+                 Minimum="{TemplateBinding Minimum}"
+                 Maximum="{TemplateBinding Maximum}"
+                 Value="{TemplateBinding Value, Mode=TwoWay}"
+                 ViewportSize="{TemplateBinding ViewportSize}">
+            <Track.DecreaseButton>
+              <RepeatButton x:Name="PART_PageUpButton"
+                            Focusable="False"
+                            IsHitTestVisible="False"
+                            Opacity="0" />
+            </Track.DecreaseButton>
+            <Track.IncreaseButton>
+              <RepeatButton x:Name="PART_PageDownButton"
+                            Focusable="False"
+                            IsHitTestVisible="False"
+                            Opacity="0" />
+            </Track.IncreaseButton>
+            <Track.Thumb>
+              <Thumb x:Name="PART_Thumb" />
+            </Track.Thumb>
+          </Track>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTable /template/ ScrollViewer ScrollBar:horizontal, controls|CodexPinnedTable /template/ ScrollViewer ScrollBar:horizontal">
+    <Setter Property="Height" Value="10" />
+    <Setter Property="MinHeight" Value="10" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ScrollBar">
+        <Border x:Name="PART_ScrollBarRoot"
+                Height="{TemplateBinding Height}"
+                MinHeight="{TemplateBinding MinHeight}"
+                Background="Transparent"
+                Padding="2,3">
+          <Track x:Name="PART_Track"
+                 Orientation="{TemplateBinding Orientation}"
+                 Minimum="{TemplateBinding Minimum}"
+                 Maximum="{TemplateBinding Maximum}"
+                 Value="{TemplateBinding Value, Mode=TwoWay}"
+                 ViewportSize="{TemplateBinding ViewportSize}">
+            <Track.DecreaseButton>
+              <RepeatButton x:Name="PART_PageLeftButton"
+                            Focusable="False"
+                            IsHitTestVisible="False"
+                            Opacity="0" />
+            </Track.DecreaseButton>
+            <Track.IncreaseButton>
+              <RepeatButton x:Name="PART_PageRightButton"
+                            Focusable="False"
+                            IsHitTestVisible="False"
+                            Opacity="0" />
+            </Track.IncreaseButton>
+            <Track.Thumb>
+              <Thumb x:Name="PART_Thumb" />
+            </Track.Thumb>
+          </Track>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTable /template/ ScrollViewer ScrollBar Thumb#PART_Thumb, controls|CodexPinnedTable /template/ ScrollViewer ScrollBar Thumb#PART_Thumb">
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Thumb">
+        <Border x:Name="PART_ThumbSurface"
+                Background="{DynamicResource CodexSwitch.MutedForegroundBrush}"
+                CornerRadius="{DynamicResource CodexSwitch.RadiusLg}"
+                Opacity="0.58" />
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTable /template/ ScrollViewer ScrollBar Thumb#PART_Thumb /template/ Border#PART_ThumbSurface,
+                   controls|CodexPinnedTable /template/ ScrollViewer ScrollBar Thumb#PART_Thumb /template/ Border#PART_ThumbSurface">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="Background" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTable /template/ ScrollViewer ScrollBar Thumb#PART_Thumb:pointerover /template/ Border#PART_ThumbSurface,
+                   controls|CodexPinnedTable /template/ ScrollViewer ScrollBar Thumb#PART_Thumb:pointerover /template/ Border#PART_ThumbSurface">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.ForegroundBrush}" />
+    <Setter Property="Opacity" Value="0.72" />
+  </Style>
+
+  <Style Selector="controls|CodexTableHeader">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTableBody">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="ItemsPanel">
+      <ItemsPanelTemplate>
+        <StackPanel />
+      </ItemsPanelTemplate>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <ItemsPresenter />
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTableFooter">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="{TemplateBinding Background}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTableRow">
+    <Setter Property="MinHeight" Value="44" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource CodexSwitch.BorderBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="Background" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <BrushTransition Property="BorderBrush" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border x:Name="PART_RowRoot"
+                MinHeight="{TemplateBinding MinHeight}"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            VerticalAlignment="Center" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTable.hoverable controls|CodexTableRow:pointerover /template/ Border#PART_RowRoot">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.AccentBrush}" />
+  </Style>
+
+  <Style Selector="controls|CodexTable.striped controls|CodexTableBody controls|CodexTableRow /template/ Border#PART_RowRoot">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}" />
+  </Style>
+
+  <Style Selector="controls|CodexTableRow.selected /template/ Border#PART_RowRoot">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}" />
+  </Style>
+
+  <Style Selector="controls|CodexTableHeader controls|CodexTableRow /template/ Border#PART_RowRoot">
+    <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}" />
+  </Style>
+
+  <Style Selector="controls|CodexTableHead">
+    <Setter Property="FontFamily" Value="{DynamicResource CodexSwitch.FontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource CodexSwitch.FontSizeSm}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.MutedForegroundBrush}" />
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="MinWidth" Value="120" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Foreground" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <ThicknessTransition Property="Padding" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border x:Name="PART_Head"
+                MinWidth="{TemplateBinding MinWidth}"
+                Padding="{TemplateBinding Padding}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTableHead.align-center">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="controls|CodexTableHead.align-right">
+    <Setter Property="HorizontalContentAlignment" Value="Right" />
+  </Style>
+
+  <Style Selector="controls|CodexTableCell">
+    <Setter Property="FontFamily" Value="{DynamicResource CodexSwitch.FontFamily}" />
+    <Setter Property="FontSize" Value="{DynamicResource CodexSwitch.FontSizeMd}" />
+    <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.ForegroundBrush}" />
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="MinWidth" Value="120" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Foreground" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+        <ThicknessTransition Property="Padding" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border x:Name="PART_Cell"
+                MinWidth="{TemplateBinding MinWidth}"
+                Padding="{TemplateBinding Padding}">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="controls|CodexTableCell.align-center">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="controls|CodexTableCell.align-right">
+    <Setter Property="HorizontalContentAlignment" Value="Right" />
+  </Style>
+
+  <Style Selector="controls|CodexTable.compact controls|CodexTableRow">
+    <Setter Property="MinHeight" Value="36" />
+  </Style>
+
+  <Style Selector="controls|CodexTable.compact controls|CodexTableHead">
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
+  <Style Selector="controls|CodexTable.compact controls|CodexTableCell">
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
+  <Style Selector="controls|CodexTableCaption">
+    <Setter Property="Margin" Value="0,8,0,0" />
+    <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.MutedForegroundBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Foreground" Duration="{DynamicResource CodexSwitch.MotionDurationDefault}" Easing="{DynamicResource CodexSwitch.MotionEaseOut}" />
+      </Transitions>
+    </Setter>
+    <Setter Property="Template">
+      <ControlTemplate>
+        <ContentPresenter Margin="{TemplateBinding Margin}"
+                          Content="{TemplateBinding Content}"
+                          ContentTemplate="{TemplateBinding ContentTemplate}"
+                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+      </ControlTemplate>
+    </Setter>
+  </Style>
+</Styles>

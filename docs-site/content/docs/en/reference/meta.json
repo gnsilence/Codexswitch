@@ -1,0 +1,12 @@
+{
+  "title": "Reference",
+  "pages": [
+    "index",
+    "supported-endpoints",
+    "built-in-providers",
+    "config-files",
+    "pricing-catalog",
+    "cli-and-dev-commands",
+    "changelog"
+  ]
+}

@@ -1,0 +1,13 @@
+Alibaba PuHuiTi 3.0
+
+Official site: https://www.alibabafonts.com/#/font
+Downloaded from: https://fonts.alibabadesign.com/AlibabaPuHuiTi-3.zip
+Retrieved: 2026-05-21
+
+Bundled weights:
+- AlibabaPuHuiTi-3-55-Regular.ttf
+- AlibabaPuHuiTi-3-65-Medium.ttf
+- AlibabaPuHuiTi-3-75-SemiBold.ttf
+- AlibabaPuHuiTi-3-85-Bold.ttf
+
+The download endpoint requires a Referer header from the official site.

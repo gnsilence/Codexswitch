@@ -1,0 +1,254 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [v0.0.1] - 2026-09-06
+
+### Added
+
+- Added the refreshed CodexSwitch desktop interface, provider management, model pricing catalog, usage dashboard, Claude compatibility, and provider billing multipliers.
+- Added current Claude model pricing with separate five-minute and one-hour cache-write rates.
+- Added the AIOSS application and installer icon.
+
+### Changed
+
+- Updated the default provider and model catalog, routing fallback behavior, usage accounting, and release metadata for the AIOSS distribution.
+
+## [v0.2.2] - 2026-06-09
+
+### Added
+
+- Added inline provider delete confirmation on the providers page.
+
+### Changed
+
+- Refined provider context-menu handling so right-click and context-request events resolve the correct provider row.
+- Updated the `CodexSwitchUI` submodule with the latest overlay placement and docs parity work.
+- Expanded the web-parity planning notes to cover the refreshed UI flow.
+
+### Fixed
+
+- Centralized provider deletion cleanup so pending-delete state is cleared consistently after successful deletes and missing-provider cases.
+
+## [v0.2.1] - 2026-05-27
+
+### Added
+
+- Added UI-system reference coverage in the docs site, including the expanded component library and web-parity planning notes.
+
+### Changed
+
+- Integrated the expanded `CodexSwitchUI` component library across the app shell, provider dialogs, settings, and related pages.
+- Reworked provider routing, configuration persistence, and session migration flows to match the refreshed UI system.
+
+### Fixed
+
+- Preserved custom `ItemsPanel` settings in the button and input group templates so grouped controls keep honoring layout overrides.
+
+## [v0.2.0] - 2026-05-23
+
+### Added
+
+- Added a Codex OAuth JSON import flow with a dedicated import dialog and quota probe support so existing Codex app auth can be brought into the app directly.
+- Added Responses request snapshot and usage scanner plumbing to preserve request state and extract usage across proxy paths.
+- Added a standalone bilingual docs site under `docs-site/` and the matching WeChat release article and assets.
+
+### Changed
+
+- Reworked provider auth/config handling and Responses proxy forwarding to support the new import flow, websocket usage accounting, and broader provider coverage.
+- Updated the desktop shell, provider dialogs, home/providers/pages, and localized copy for the new import and provider surfaces.
+
+### Fixed
+
+- Fixed the Codex session provider casing crash.
+
+## [v0.1.1] - 2026-05-21
+
+### Added
+
+- Added provider-list default model selection so Codex and Claude Code channels can switch their active model directly from the provider row.
+
+### Changed
+
+- Bundled Alibaba PuHuiTi in the desktop app resources and applied it consistently to the app shell, theme tokens, rolling numbers, and usage trend charts.
+- Tightened compact input vertical alignment for the refreshed provider controls.
+
+### Fixed
+
+- Disposed tracked usage log writers in infrastructure tests before temp-directory cleanup so Windows CI no longer leaves daily usage log files locked.
+
+## [v0.1.0] - 2026-05-21
+
+### Added
+
+- Added a Codex sessions page that inspects session metadata by provider, shows session/index distribution, and migrates historical sessions to the CodexSwitch-managed provider.
+- Added provider enable/disable controls so disabled channels stay visible in the UI but are skipped by request routing.
+- Added upstream resilience settings for circuit breaker thresholds, recovery probe delays, outbound HTTP version, and connection timeout.
+- Added Responses WebSocket proxy support for providers that expose the OpenAI Responses websocket flow.
+- Added Claude bootstrap config handling so the installer and startup path can seed `.claude` settings automatically.
+- Added bundled macOS app icon and dock integration for the refreshed desktop shell.
+
+### Changed
+
+- Reworked Codex and Claude config writers to preserve user-authored settings, keep originals as same-name `.bak` backups, and restore from those backups on exit.
+- Reworked proxy forwarding to fail over across enabled providers on transient upstream failures while preserving non-retryable authentication and request errors.
+- Refreshed icon resolution and caching to prefer bundled Codex, Claude, and Xiaomi assets with theme-aware defaults.
+- Updated the desktop shell, provider dialogs, home/models/providers/settings pages, and localized copy for the new UI pass.
+- Updated release packaging to ship the app icon on macOS and trigger Claude bootstrap during installation.
+
+### Fixed
+
+- Preserved real Codex App auth state while ignoring the local fake auth fixture.
+- Tightened OpenAI Responses and Anthropic payload handling, startup registration, and tray/window lifecycle behavior.
+- Restored changelog ordering after the divergent `v0.0.10` and `v0.0.11` release metadata lines.
+
+## [v0.0.11] - 2026-05-21
+
+### Fixed
+
+- Corrected release metadata so the published tag, assembly version, file version, informational version, changelog entry, and installer artifact names align on `v0.0.11`.
+- Recovered the release line after the accidentally created `v0.0.10` tag pointed at the `v0.0.9` source version.
+
+## [v0.0.10] - 2026-05-20
+
+### Added
+
+- Added Responses WebSocket proxy support for providers that expose the OpenAI Responses websocket flow.
+- Added Claude bootstrap config handling so the installer and startup path can seed `.claude` settings automatically.
+- Added bundled macOS app icon and dock integration for the refreshed desktop shell.
+
+### Changed
+
+- Reworked Codex and Claude config writers to preserve user-authored settings, keep originals as same-name `.bak` backups, and restore from those backups on exit.
+- Refreshed icon resolution and caching to prefer bundled Codex, Claude, and Xiaomi assets with theme-aware defaults.
+- Updated the desktop shell, provider dialogs, home/models/providers/settings pages, and localized copy for the new UI pass.
+- Updated release packaging to ship the app icon on macOS and trigger Claude bootstrap during installation.
+
+### Fixed
+
+- Preserved real Codex App auth state while ignoring the local fake auth fixture.
+- Tightened OpenAI Responses and Anthropic payload handling, startup registration, and tray/window lifecycle behavior.
+
+## [v0.0.9] - 2026-05-15
+
+### Changed
+
+- Added a subtle fade/slide transition when Codex table content changes.
+- Widened the pinned table side columns so longer labels fit more comfortably.
+
+## [v0.0.8] - 2026-05-15
+
+### Changed
+
+- Refactored usage log table from CodexPinnedTable to CodexTable for simplified layout and improved maintainability.
+- Updated CodexSwitchUI submodule with latest UI component improvements.
+
+### Fixed
+
+- Stabilized macOS DMG packaging with staging directory and retry logic to prevent transient resource-busy errors on macOS 14 runners.
+
+## [v0.0.7] - 2026-05-15
+
+### Added
+
+- Added a Home dashboard with live proxy and provider summary cards, range-scoped usage metrics, token and cost trend charts, and provider/model ranked breakdowns.
+- Added built-in Codex OAuth account enrichment and multi-account management, including ChatGPT workspace resolution, plan and quota snapshots, and usage-query support per enabled OAuth account.
+- Added output tokens-per-second and page navigation to the local usage log table.
+
+### Changed
+
+- Restructured the desktop shell around the new sidebar and home layout, and moved version/update status into the lower-left footer.
+- Updated the Codex OAuth provider template to use the current Codex client headers and request overrides.
+- Removed the repo `global.json` SDK pin so local builds follow the installed .NET SDK.
+
+### Fixed
+
+- Normalized OpenAI Chat replay so tool outputs stay immediately after assistant tool calls and unmatched tool calls are dropped before proxying upstream.
+- Restored Codex OAuth provider defaults and account metadata consistently during config migration and refresh flows.
+- Matched Electron-style macOS packaging by always building `.app`/`.dmg` release artifacts without requiring Developer ID signing or notarization.
+- Made macOS DMG creation use a staging directory with retries so macOS 14 runners do not fail on transient `hdiutil` resource-busy errors.
+
+## [v0.0.6] - 2026-05-14
+
+### Added
+
+- Added Anthropic Messages compatibility for OpenAI Chat and OpenAI Responses providers, including non-streaming and streaming conversion for messages, tool use, reasoning output, and usage accounting.
+- Added a separate hover details window for the mini status panel while keeping the compact usage strip pinned in place.
+- Added richer button variants, pressed/hover states, focus-visible styling, icon sizing, and danger styles.
+
+### Changed
+
+- Switched the built-in DeepSeek template and migration path back to the OpenAI-compatible Chat API while keeping Claude Code support enabled.
+- Updated Claude Code proxy settings to write the proxy root URL instead of appending `/v1`.
+- Made Windows release packaging prefer `iscc` from `PATH` and handle runners without `ProgramFiles(x86)`.
+
+### Fixed
+
+- Automatically enable Claude Code support when a provider is switched to the Anthropic Messages protocol.
+- Signed, notarized, and Gatekeeper-validated macOS release DMGs when Apple release credentials are configured.
+
+## [v0.0.5] - 2026-05-14
+
+### Added
+
+- Added outbound network proxy settings with system proxy, custom proxy, and disabled proxy modes.
+- Added a shared HTTP client factory that defaults to the system proxy, prefers HTTP/2, keeps pooled connections alive, and enables HTTP/2 keep-alive pings.
+- Added Claude Code provider settings that write and restore `~/.claude/settings.json`, expose provider/model controls, and route `/v1/messages` through CodexSwitch.
+- Added Claude Code `sonnet`, `opus`, and `haiku` aliases for Anthropic providers, including optional 1M context handling for Sonnet models.
+- Added manual Claude Code model entry with quick model buttons and preserved Anthropic extension headers when proxying `/v1/messages`.
+
+### Changed
+
+- Optimized the local Codex to CodexSwitch proxy listener for low-latency keep-alive connections with TCP no-delay, longer client keep-alive, disabled response buffering, and higher connection limits.
+- Split active provider selection for Codex and Claude Code so the local proxy can serve either client and migrate legacy provider configs safely.
+- Recreate shared networking services when proxy settings change so provider adapters, OAuth, usage queries, icon loading, and update checks use the latest network configuration.
+- Moved proxy request usage logging to buffered background writes and coalesced concurrent OAuth token refreshes to reduce request-path latency.
+- Bounded cached Responses conversation state with capacity and TTL pruning to prevent unbounded memory growth.
+
+## [v0.0.4] - 2026-05-13
+
+### Added
+
+- Added configurable automatic update checks with system-specific installer selection, automatic download, and progress display.
+
+### Changed
+
+- Excluded `.pdb` files from CI release installers and disabled debug symbol generation for release publishing.
+
+## [v0.0.3] - 2026-05-13
+
+### Changed
+
+- Replaced zipped CI release artifacts with platform installers: Windows setup executable, macOS DMG, and Linux AppImage.
+- Made CI publish commands explicitly request Native AOT and self-contained output for release packaging.
+
+## [v0.0.2] - 2026-05-13
+
+### Changed
+
+- Removed the macOS x64/AMD CI publish target and release artifact from the default release matrix.
+- Automated GitHub Release publishing from tagged CI runs with write-scoped release permissions.
+
+## [v0.0.1] - 2026-05-13
+
+### Added
+
+- Initial public release of CodexSwitch.
+- Multi-provider proxy support for OpenAI, Anthropic, Gemini, DeepSeek, Codex, and Xiaomi-compatible endpoints.
+- Provider templates, routing resolution, request parsing, and response conversion for the supported provider styles.
+- Usage ingestion, query, and trend visualization for local logs, plus dashboard formatting and pricing helpers.
+- Startup registration, tray menu controls, and local proxy lifecycle management for desktop use.
+- Localized Avalonia UI updates across the settings, providers, add-provider, and usage pages.
+- Expanded test coverage for config writing, payload building, startup registration, provider usage queries, and UI infrastructure.
+- Bundled provider icons and a sample auth fixture for local development and testing.
+
+### Changed
+
+- Reworked the proxy adapters and model-conversion pipeline to support the expanded routing and usage flow.
+
+### Fixed
+
+- Fixed migration, validation, and UI infrastructure issues uncovered while assembling the release.

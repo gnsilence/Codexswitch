@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <Description>Avalonia desktop documentation gallery for CodexSwitchUI.</Description>
+    <BuildProjectReferences>false</BuildProjectReferences>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodexSwitchUI\CodexSwitchUI.csproj" />
+    <ProjectReference Include="..\CodexSwitchUI.ECharts\CodexSwitchUI.ECharts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\..\CodexSwitch\Assets\icons\*.png"
+                      Link="Assets\icons\%(Filename)%(Extension)" />
+    <AvaloniaResource Remove="Examples\Axaml\**\*.axaml" />
+    <Compile Remove="Examples\CSharp\**\*.cs" />
+    <None Update="Examples\Axaml\**\*.axaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Examples\CSharp\**\*.cs">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

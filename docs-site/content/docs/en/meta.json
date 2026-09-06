@@ -1,0 +1,13 @@
+{
+  "title": "CodexSwitch Docs",
+  "pages": [
+    "index",
+    "start",
+    "core-concepts",
+    "guides",
+    "reference",
+    "operations",
+    "ui-system",
+    "contributing"
+  ]
+}

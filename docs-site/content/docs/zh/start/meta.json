@@ -1,0 +1,10 @@
+{
+  "title": "Start",
+  "pages": [
+    "index",
+    "installation",
+    "quick-start",
+    "run-from-source",
+    "docs-directory"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "title": "Core Concepts",
+  "pages": [
+    "index",
+    "local-proxy",
+    "providers",
+    "models-and-routes",
+    "protocols",
+    "managed-client-config",
+    "usage-logs-and-pricing"
+  ]
+}
