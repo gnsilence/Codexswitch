@@ -40,6 +40,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private readonly ClaudeCodeConfigWriter _claudeCodeConfigWriter;
     private readonly CodexSessionMigrationService _codexSessionMigrationService;
     private readonly I18nService _i18n;
+    private readonly CodexDesktopClientLauncher _codexDesktopClientLauncher = new();
     private HttpClient _sharedHttpClient = null!;
     private IconCacheService _iconCacheService = null!;
     private ProviderAuthService _providerAuthService = null!;
@@ -696,9 +697,17 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _miniStatusTimer.Start();
         RefreshMiniStatus();
         _ = RefreshProviderUsageQueriesAsync();
-        _ = _config.Proxy.Enabled
+        var proxyStartupTask = _config.Proxy.Enabled
             ? RestartProxyAsync()
             : _proxyHostService.StartAsync(_config);
+        _ = LaunchDefaultClientAfterStartupAsync(proxyStartupTask);
+    }
+
+    private async Task LaunchDefaultClientAfterStartupAsync(Task proxyStartupTask)
+    {
+        await proxyStartupTask;
+        if (_config.Ui.DefaultApp == ClientAppKind.Codex)
+            _codexDesktopClientLauncher.TryLaunch();
     }
 
     public ObservableCollection<ClientAppItem> ClientApps { get; }
