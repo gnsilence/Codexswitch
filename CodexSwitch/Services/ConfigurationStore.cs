@@ -2,7 +2,7 @@ namespace CodexSwitch.Services;
 
 public sealed class ConfigurationStore
 {
-    private const int CurrentConfigSchemaVersion = 1;
+    private const int CurrentConfigSchemaVersion = 3;
     private readonly AppPaths _paths;
 
     public ConfigurationStore(AppPaths paths)
@@ -95,7 +95,10 @@ public sealed class ConfigurationStore
         if (config.Providers.Count == 0)
             SeedDefaultProviders(config);
 
-        MigrateBuiltInProviders(config);
+        if (previousSchemaVersion < 2)
+            MigrateBuiltInProviders(config);
+        if (previousSchemaVersion < 3)
+            MigrateOpenAiResponsesProtocols(config);
         EnsureRequiredBuiltIns(config);
         if (previousSchemaVersion < 1)
             MigrateLegacyAiossBillingMultipliers(config);
@@ -124,6 +127,37 @@ public sealed class ConfigurationStore
             if (provider.Cost.Multiplier == 1m)
                 provider.Cost.Multiplier = 0.13m;
         }
+    }
+
+    private static void MigrateOpenAiResponsesProtocols(AppConfig config)
+    {
+        foreach (var provider in config.Providers)
+        {
+            if (!IsOpenAiResponsesBuiltin(provider.BuiltinId))
+                continue;
+            if (!IsBaseUrl(provider, ProviderTemplateCatalog.AiossBaseUrl) &&
+                !string.Equals(provider.BuiltinId, ProviderTemplateCatalog.RoutinAiBuiltinId, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(provider.BuiltinId, ProviderTemplateCatalog.RoutinAiPlanBuiltinId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (provider.Protocol == ProviderProtocol.OpenAiChat)
+                provider.Protocol = ProviderProtocol.OpenAiResponses;
+
+            foreach (var route in provider.Models)
+            {
+                if (route.Protocol == ProviderProtocol.OpenAiChat)
+                    route.Protocol = ProviderProtocol.OpenAiResponses;
+            }
+        }
+    }
+
+    private static bool IsOpenAiResponsesBuiltin(string? builtinId)
+    {
+        return string.Equals(builtinId, ProviderTemplateCatalog.DeepSeekBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, ProviderTemplateCatalog.XiaomiBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, ProviderTemplateCatalog.GrokBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, ProviderTemplateCatalog.RoutinAiBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, ProviderTemplateCatalog.RoutinAiPlanBuiltinId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void SaveJsonAtomically<T>(
@@ -286,7 +320,6 @@ public sealed class ConfigurationStore
                 provider.Website ??= "https://api.routin.ai";
                 provider.IconSlug = IconCacheService.RoutinAiIconSlug;
                 provider.AuthMode = ProviderAuthMode.ApiKey;
-                provider.Protocol = ProviderProtocol.OpenAiResponses;
                 provider.DefaultModel = string.IsNullOrWhiteSpace(provider.DefaultModel) ? CodexSwitchDefaults.ManagedCodexModel : provider.DefaultModel;
                 provider.Cost ??= new ProviderCostSettings { FastMode = true };
                 SyncProviderTemplate(provider, ProviderTemplateCatalog.RoutinAiBuiltinId);
@@ -298,7 +331,6 @@ public sealed class ConfigurationStore
                 provider.Website ??= "https://api.routin.ai";
                 provider.IconSlug = IconCacheService.RoutinAiIconSlug;
                 provider.AuthMode = ProviderAuthMode.ApiKey;
-                provider.Protocol = ProviderProtocol.OpenAiResponses;
                 provider.DefaultModel = string.IsNullOrWhiteSpace(provider.DefaultModel) ? CodexSwitchDefaults.ManagedCodexModel : provider.DefaultModel;
                 SyncProviderTemplate(provider, ProviderTemplateCatalog.RoutinAiPlanBuiltinId);
             }
@@ -308,13 +340,7 @@ public sealed class ConfigurationStore
                 provider.DisplayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? "Xiaomi MiMo" : provider.DisplayName;
                 provider.Website ??= "https://platform.xiaomimimo.com";
                 provider.IconSlug ??= "xiaomi";
-                if (string.IsNullOrWhiteSpace(provider.BaseUrl) ||
-                    IsBaseUrl(provider, ProviderTemplateCatalog.XiaomiLegacyBaseUrl))
-                {
-                    provider.BaseUrl = ProviderTemplateCatalog.OpenAiOfficialBaseUrl;
-                }
                 provider.AuthMode = ProviderAuthMode.ApiKey;
-                provider.Protocol = ProviderProtocol.OpenAiChat;
                 provider.DefaultModel = string.IsNullOrWhiteSpace(provider.DefaultModel) ? "mimo-v2.5-pro" : provider.DefaultModel;
                 SyncProviderTemplate(provider, ProviderTemplateCatalog.XiaomiBuiltinId);
             }
@@ -350,10 +376,8 @@ public sealed class ConfigurationStore
                 provider.DisplayName = string.IsNullOrWhiteSpace(provider.DisplayName) ? "DeepSeek" : provider.DisplayName;
                 provider.Website ??= "https://platform.deepseek.com";
                 provider.IconSlug ??= "deepseek";
-                provider.BaseUrl = "https://api.deepseek.com/v1";
                 provider.AuthMode = ProviderAuthMode.ApiKey;
-                provider.Protocol = ProviderProtocol.OpenAiChat;
-                provider.DefaultModel = string.IsNullOrWhiteSpace(provider.DefaultModel) ? "deepseek-v4-flash" : provider.DefaultModel;
+                provider.DefaultModel = string.IsNullOrWhiteSpace(provider.DefaultModel) ? "deepseek-flash" : provider.DefaultModel;
                 SyncProviderTemplate(provider, ProviderTemplateCatalog.DeepSeekBuiltinId);
             }
             if (provider.AuthMode == ProviderAuthMode.OAuth)
@@ -422,8 +446,8 @@ public sealed class ConfigurationStore
 
     private static bool ShouldApplyAiossUsageQuery(ProviderConfig provider)
     {
-        if (!string.Equals(provider.BuiltinId, ProviderTemplateCatalog.AiossPlusBuiltinId, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(provider.BuiltinId, ProviderTemplateCatalog.AiossProBuiltinId, StringComparison.OrdinalIgnoreCase))
+        if (!ProviderTemplateCatalog.IsAiossUsageProvider(provider.BuiltinId) ||
+            !IsBaseUrl(provider, ProviderTemplateCatalog.AiossBaseUrl))
         {
             return false;
         }
@@ -534,6 +558,8 @@ public sealed class ConfigurationStore
         if (template is null)
             return;
 
+        if (string.IsNullOrWhiteSpace(provider.BaseUrl))
+            provider.BaseUrl = template.BaseUrl;
         if (string.IsNullOrWhiteSpace(provider.DefaultModel))
             provider.DefaultModel = template.DefaultModel;
 
@@ -559,10 +585,12 @@ public sealed class ConfigurationStore
             provider.ClaudeCode.Model = ResolveDefaultClaudeCodeModel(provider);
 
         provider.Models ??= [];
-        foreach (var templateModel in template.Models)
-            UpsertModelRoute(provider.Models, templateModel);
+        if (provider.Models.Count == 0)
+        {
+            foreach (var templateModel in template.Models)
+                UpsertModelRoute(provider.Models, templateModel);
+        }
 
-        MigrateBuiltInTemplateRoutes(provider, templateId);
         ProviderTemplateCatalog.EnsureDefaultModelConversion(provider);
     }
 
@@ -587,84 +615,6 @@ public sealed class ConfigurationStore
         existing.Cost ??= new ProviderCostSettings { FastMode = templateModel.FastMode };
     }
 
-    private static void MigrateBuiltInTemplateRoutes(ProviderConfig provider, string templateId)
-    {
-        if (string.Equals(templateId, ProviderTemplateCatalog.DeepSeekBuiltinId, StringComparison.OrdinalIgnoreCase))
-        {
-            foreach (var route in provider.Models)
-            {
-                if (IsDefaultDeepSeekRoute(route))
-                    route.Protocol = ProviderProtocol.OpenAiChat;
-            }
-
-            return;
-        }
-
-        if (string.Equals(templateId, ProviderTemplateCatalog.RoutinAiBuiltinId, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(templateId, ProviderTemplateCatalog.RoutinAiPlanBuiltinId, StringComparison.OrdinalIgnoreCase))
-        {
-            foreach (var route in provider.Models)
-            {
-                if (IsDefaultRoutinAiDeepSeekRoute(route))
-                    route.Protocol = ProviderProtocol.OpenAiChat;
-            }
-        }
-    }
-
-    private static bool IsDefaultDeepSeekRoute(ModelRouteConfig route)
-    {
-        if (!IsDeepSeekRouteId(route.Id) || route.Protocol != ProviderProtocol.AnthropicMessages)
-            return false;
-
-        return (string.IsNullOrWhiteSpace(route.DisplayName) ||
-                string.Equals(route.DisplayName, GetDeepSeekDisplayName(route.Id), StringComparison.OrdinalIgnoreCase)) &&
-            string.IsNullOrWhiteSpace(route.UpstreamModel) &&
-            string.IsNullOrWhiteSpace(route.ServiceTier) &&
-            route.Cost is null or { FastMode: false };
-    }
-
-    private static bool IsDefaultRoutinAiDeepSeekRoute(ModelRouteConfig route)
-    {
-        if (!IsRoutinAiDeepSeekRouteId(route.Id))
-            return false;
-
-        if (route.Protocol != ProviderProtocol.OpenAiResponses)
-            return false;
-
-        return (string.IsNullOrWhiteSpace(route.DisplayName) ||
-                string.Equals(route.DisplayName, GetDeepSeekDisplayName(route.Id), StringComparison.OrdinalIgnoreCase)) &&
-            string.IsNullOrWhiteSpace(route.UpstreamModel) &&
-            (string.IsNullOrWhiteSpace(route.ServiceTier) ||
-                string.Equals(route.ServiceTier, "priority", StringComparison.OrdinalIgnoreCase)) &&
-            route.Cost is null or { FastMode: true };
-    }
-
-    private static bool IsDeepSeekRouteId(string id)
-    {
-        return string.Equals(id, "deepseek-v4-flash", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(id, "deepseek-v4-pro", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(id, "deepseek-chat", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(id, "deepseek-reasoner", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsRoutinAiDeepSeekRouteId(string id)
-    {
-        return string.Equals(id, "deepseek-v4-flash", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(id, "deepseek-v4-pro", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string GetDeepSeekDisplayName(string id)
-    {
-        if (string.Equals(id, "deepseek-v4-pro", StringComparison.OrdinalIgnoreCase))
-            return "DeepSeek V4 Pro";
-        if (string.Equals(id, "deepseek-chat", StringComparison.OrdinalIgnoreCase))
-            return "DeepSeek Chat";
-        if (string.Equals(id, "deepseek-reasoner", StringComparison.OrdinalIgnoreCase))
-            return "DeepSeek Reasoner";
-
-        return "DeepSeek V4 Flash";
-    }
-
     private static bool EnsurePricingDefaults(ModelPricingCatalog catalog)
     {
         catalog.Currency = string.IsNullOrWhiteSpace(catalog.Currency) ? "USD" : catalog.Currency;
@@ -681,7 +631,8 @@ public sealed class ConfigurationStore
             for (var index = catalog.Models.Count - 1; index >= 0; index--)
             {
                 if (IsManagedGptPricingRule(catalog.Models[index].Id) ||
-                    IsManagedClaudePricingRule(catalog.Models[index].Id))
+                    IsManagedClaudePricingRule(catalog.Models[index].Id) ||
+                    IsManagedDeepSeekPricingRule(catalog.Models[index].Id))
                     catalog.Models.RemoveAt(index);
             }
             foreach (var rule in BuiltInModelCatalog.CreatePricingRules())
@@ -703,6 +654,11 @@ public sealed class ConfigurationStore
     private static bool IsManagedClaudePricingRule(string id)
     {
         return id.StartsWith("claude-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsManagedDeepSeekPricingRule(string id)
+    {
+        return id.StartsWith("deepseek-", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool UpsertPricingRule(Collection<ModelPricingRule> rules, ModelPricingRule template)

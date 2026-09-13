@@ -102,7 +102,7 @@ public sealed class PriceCalculatorTests
     {
         var rule = Assert.Single(
             BuiltInModelCatalog.CreatePricingRules(),
-            item => item.Id == "gpt-5.4-mini");
+            item => item.Id == "gpt-5.6-terra");
         var calculator = new PriceCalculator(new ModelPricingCatalog
         {
             BillingUnitTokens = 1_000_000,
@@ -110,13 +110,13 @@ public sealed class PriceCalculatorTests
         });
 
         var cost = calculator.Calculate(
-            "gpt-5.4-mini",
+            "gpt-5.6-terra",
             new UsageTokens(1_000_000, 0, 0, 0, 0),
             new ProviderCostSettings { Multiplier = 0.13m });
 
         Assert.Equal(0.13m, cost.Multiplier);
-        Assert.Equal(0.75m, cost.InputCost);
-        Assert.Equal(0.0975m, cost.Total);
+        Assert.Equal(4m, cost.InputCost);
+        Assert.Equal(0.52m, cost.Total);
     }
 
     [Fact]

@@ -32,6 +32,10 @@ public sealed class ModelInfoResponse
 
     public long Created { get; set; }
 
+    [JsonPropertyName("display_name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisplayName { get; set; }
+
     public string OwnedBy { get; set; } = "codexswitch";
 }
 

@@ -38,6 +38,32 @@
         <Style Selector="ui|CodexIconButton.provider-pin-button:focus">
             <Setter Property="Opacity" Value="1"/>
         </Style>
+        <Style Selector="ui|CodexIconButton.provider-codex-sync-button">
+            <Setter Property="Opacity" Value="0"/>
+            <Setter Property="IsHitTestVisible" Value="False"/>
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition Property="Opacity" Duration="0:0:0.12"/>
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Grid.provider-list-row:pointerover ui|CodexIconButton.provider-codex-sync-button">
+            <Setter Property="Opacity" Value="1"/>
+            <Setter Property="IsHitTestVisible" Value="True"/>
+        </Style>
+        <Style Selector="ui|CodexIconButton.provider-codex-sync-button:focus">
+            <Setter Property="Opacity" Value="1"/>
+        </Style>
+        <Style Selector="ui|CodexIconButton.provider-action-button">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Grid.provider-actions">
+            <Setter Property="MinHeight" Value="40"/>
+        </Style>
         <Style Selector="Border.provider-drag-handle">
             <Setter Property="Width" Value="20"/>
             <Setter Property="MinHeight" Value="46"/>
@@ -125,7 +151,12 @@
             <Setter Property="MaxDropDownHeight" Value="260"/>
         </Style>
         <Style Selector="ui|CodexPopover.provider-delete-popover">
+            <Setter Property="Width" Value="40"/>
             <Setter Property="Padding" Value="12"/>
+            <Setter Property="MinWidth" Value="40"/>
+            <Setter Property="MaxWidth" Value="40"/>
+        </Style>
+        <Style Selector="ui|CodexPopover.provider-delete-popover /template/ Border#PART_Surface">
             <Setter Property="MinWidth" Value="240"/>
             <Setter Property="MaxWidth" Value="280"/>
         </Style>
@@ -270,10 +301,22 @@
                                     </Border>
                                 </ui:CodexProviderCard.Usage>
                                 <ui:CodexProviderCard.Actions>
-                                    <StackPanel Orientation="Horizontal"
-                                                Spacing="4"
-                                                HorizontalAlignment="Right">
-                                        <ui:CodexIconButton Classes="provider-pin-button"
+                                    <Grid Classes="provider-actions"
+                                          Width="208"
+                                          ColumnDefinitions="*,*,*,*"
+                                          HorizontalAlignment="Right"
+                                          VerticalAlignment="Center">
+                                        <ui:CodexIconButton Grid.Column="0"
+                                                            Classes="provider-action-button provider-codex-sync-button"
+                                                            Command="{Binding SyncToCodexCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip.Tip="{i18n:Tr providers.syncCodex}"
+                                                            Variant="Ghost"
+                                                            IsVisible="{Binding IsCodexProvider}">
+                                            <lucide:LucideIcon Kind="RefreshCw" Size="16" StrokeWidth="2"/>
+                                        </ui:CodexIconButton>
+                                        <ui:CodexIconButton Grid.Column="1"
+                                                            Classes="provider-action-button provider-pin-button"
                                                             Command="{Binding TogglePinCommand}"
                                                             CommandParameter="{Binding}"
                                                             ToolTip.Tip="{i18n:Tr providers.pin}"
@@ -281,7 +324,8 @@
                                                             IsVisible="{Binding IsNotPinned}">
                                             <lucide:LucideIcon Kind="Pin" Size="16" StrokeWidth="2"/>
                                         </ui:CodexIconButton>
-                                        <ui:CodexIconButton Classes="provider-pin-button"
+                                        <ui:CodexIconButton Grid.Column="1"
+                                                            Classes="provider-action-button provider-pin-button"
                                                             Command="{Binding TogglePinCommand}"
                                                             CommandParameter="{Binding}"
                                                             ToolTip.Tip="{i18n:Tr providers.unpin}"
@@ -289,22 +333,26 @@
                                                             IsVisible="{Binding IsPinned}">
                                             <lucide:LucideIcon Kind="PinOff" Size="16" StrokeWidth="2"/>
                                         </ui:CodexIconButton>
-                                        <ui:CodexIconButton Command="{Binding EditCommand}"
+                                        <ui:CodexIconButton Grid.Column="2"
+                                                            Classes="provider-action-button"
+                                                            Command="{Binding EditCommand}"
                                                             CommandParameter="{Binding}"
                                                             ToolTip.Tip="{i18n:Tr providers.edit}"
                                                             Variant="Ghost">
                                             <lucide:LucideIcon Kind="Pencil" Size="16" StrokeWidth="2"/>
                                         </ui:CodexIconButton>
-                                        <ui:CodexPopover x:Name="DeleteProviderPopover"
+                                        <ui:CodexPopover Grid.Column="3"
+                                                         x:Name="DeleteProviderPopover"
                                                          Classes="provider-delete-popover"
                                                          Placement="Left"
                                                          Align="Center"
+                                                         HorizontalAlignment="Center"
                                                          IsArrowVisible="True"
                                                          IsCloseVisible="False"
                                                          Title="{i18n:Tr deleteProvider.title}"
                                                          Description="{i18n:Tr deleteProvider.description}">
                                             <ui:CodexPopover.Trigger>
-                                                <ui:CodexIconButton Classes="provider-delete-button"
+                                                <ui:CodexIconButton Classes="provider-action-button provider-delete-button"
                                                                     ToolTip.Tip="{i18n:Tr providers.delete}"
                                                                     Variant="Ghost">
                                                     <lucide:LucideIcon Kind="Trash2" Size="16" StrokeWidth="2"/>
@@ -331,11 +379,11 @@
                                                                     Size="Small"
                                                                     Variant="Destructive"
                                                                     Command="{Binding ConfirmDeleteCommand}"
-                                                                    CommandParameter="{Binding}"/>
+                                                    CommandParameter="{Binding}"/>
                                                 </StackPanel>
                                             </ui:CodexPopover.Action>
                                         </ui:CodexPopover>
-                                    </StackPanel>
+                                    </Grid>
                                 </ui:CodexProviderCard.Actions>
                             </ui:CodexProviderCard>
                         </Grid>

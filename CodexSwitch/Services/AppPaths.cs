@@ -26,6 +26,7 @@ public sealed class AppPaths
         CodexDirectory = codexRoot;
         CodexConfigPath = Path.Combine(codexRoot, "config.toml");
         CodexAuthPath = Path.Combine(codexRoot, "auth.json");
+        CodexModelCatalogPath = Path.Combine(codexRoot, CodexConfigWriter.ManagedModelCatalogFileName);
 
         var claudeRoot = claudeDirectory ??
             (codexDirectory is not null
@@ -56,6 +57,8 @@ public sealed class AppPaths
     public string CodexConfigPath { get; }
 
     public string CodexAuthPath { get; }
+
+    public string CodexModelCatalogPath { get; }
 
     public string ClaudeDirectory { get; }
 

@@ -36,6 +36,7 @@ namespace CodexSwitch.Serialization;
 [JsonSerializable(typeof(ModelsListResponse))]
 [JsonSerializable(typeof(ModelInfoResponse))]
 [JsonSerializable(typeof(CodexAuthFile))]
+[JsonSerializable(typeof(CodexModelCatalog))]
 [JsonSerializable(typeof(GitHubReleaseResponse))]
 [JsonSerializable(typeof(GitHubReleaseAssetResponse))]
 internal sealed partial class CodexSwitchJsonContext : JsonSerializerContext;

@@ -168,6 +168,18 @@ public sealed class AppViewMigrationTests
     }
 
     [Fact]
+    public void ProvidersPageExposesCodexSyncAction()
+    {
+        var source = File.ReadAllText(FindRepoFile("CodexSwitch", "Views", "Pages", "ProvidersPage.axaml"));
+
+        Assert.Contains("provider-codex-sync-button", source);
+        Assert.Contains("Command=\"{Binding SyncToCodexCommand}\"", source);
+        Assert.Contains("IsVisible=\"{Binding IsCodexProvider}\"", source);
+        Assert.Contains("ToolTip.Tip=\"{i18n:Tr providers.syncCodex}\"", source);
+        Assert.Contains("Kind=\"RefreshCw\"", source);
+    }
+
+    [Fact]
     public void ModelCatalogRefreshesAfterProviderActivationAndWhenPageOpens()
     {
         var source = File.ReadAllText(Path.Combine(

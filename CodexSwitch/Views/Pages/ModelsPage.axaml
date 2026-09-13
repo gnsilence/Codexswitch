@@ -17,15 +17,25 @@
                     <ui:CsText Text="{i18n:Tr models.description}"
                                Classes="muted"/>
                 </StackPanel>
-                <ui:CsButton Grid.Column="1"
-                             Classes="compact"
-                             Command="{Binding AddPricingModelCommand}"
-                             VerticalAlignment="Top">
-                    <StackPanel Orientation="Horizontal" Spacing="7">
-                        <lucide:LucideIcon Kind="Plus" Size="14" StrokeWidth="2"/>
-                        <TextBlock Text="{i18n:Tr models.add}"/>
-                    </StackPanel>
-                </ui:CsButton>
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Top">
+                    <ui:CsButton Classes="compact"
+                                 Command="{Binding RefreshProviderModelsCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <lucide:LucideIcon Kind="RefreshCw" Size="14" StrokeWidth="2"/>
+                            <TextBlock Text="{i18n:Tr models.fetchProviderModels}"/>
+                        </StackPanel>
+                    </ui:CsButton>
+                    <ui:CsButton Classes="compact"
+                                 Command="{Binding AddPricingModelCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <lucide:LucideIcon Kind="Plus" Size="14" StrokeWidth="2"/>
+                            <TextBlock Text="{i18n:Tr models.add}"/>
+                        </StackPanel>
+                    </ui:CsButton>
+                </StackPanel>
             </Grid>
 
             <ui:CsPanel Grid.Row="1" Padding="16">

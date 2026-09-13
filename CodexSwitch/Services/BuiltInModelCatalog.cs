@@ -5,25 +5,22 @@ namespace CodexSwitch.Services;
 
 public static class BuiltInModelCatalog
 {
-    public const string PricingSchemaVersion = "1.5";
+    public const string PricingSchemaVersion = "1.6";
     public const long OpenAiLongContextThresholdTokens = 272_000;
     public const long XiaomiLongContextThresholdTokens = 256_000;
 
-    public static IReadOnlyList<ProviderTemplateModel> AiossModels { get; } =
-    [
-        OpenAiResponsesRoute("gpt-5.6-terra", "GPT-5.6 Terra")
-    ];
+    public static IReadOnlyList<ProviderTemplateModel> AiossModels => OpenAiOfficialModels;
 
     public static IReadOnlyList<ProviderTemplateModel> RoutinAiModels { get; } =
     [
+        OpenAiResponsesRoute("gpt-6-astra", "GPT-6 Astra", serviceTier: "priority", fastMode: true),
+        OpenAiResponsesRoute("gpt-5.6-sol", "GPT-5.6 Sol", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-5.6-terra", "GPT-5.6 Terra", serviceTier: "priority", fastMode: true),
+        OpenAiResponsesRoute("gpt-5.6-luna", "GPT-5.6 Luna", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-5.5", "GPT-5.5", serviceTier: "priority", fastMode: true),
-        OpenAiResponsesRoute("gpt-5", "GPT-5", upstreamModel: "gpt-5.5", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-5.4", "GPT-5.4", serviceTier: "priority", fastMode: true),
-        OpenAiResponsesRoute("gpt-5.4-mini", "GPT-5.4 Mini", serviceTier: "priority", fastMode: true),
-        OpenAiResponsesRoute("gpt-5.3-codex", "GPT-5.3 Codex", serviceTier: "priority", fastMode: true),
-        OpenAiChatRoute("deepseek-v4-flash", "DeepSeek V4 Flash", serviceTier: "priority", fastMode: true),
-        OpenAiChatRoute("deepseek-v4-pro", "DeepSeek V4 Pro", serviceTier: "priority", fastMode: true),
+        OpenAiResponsesRoute("deepseek-v4-flash", "DeepSeek V4 Flash", serviceTier: "priority", fastMode: true),
+        OpenAiResponsesRoute("deepseek-v4-pro", "DeepSeek V4 Pro", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("mimo-v2-flash", "MiMo V2 Flash", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("mimo-v2-pro", "MiMo V2 Pro", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("mimo-v2.5-pro", "MiMo V2.5 Pro", serviceTier: "priority", fastMode: true)
@@ -31,16 +28,20 @@ public static class BuiltInModelCatalog
 
     public static IReadOnlyList<ProviderTemplateModel> OpenAiOfficialModels { get; } =
     [
+        OpenAiResponsesRoute("gpt-6-astra", "GPT-6 Astra"),
+        OpenAiResponsesRoute("gpt-5.6-sol", "GPT-5.6 Sol"),
         OpenAiResponsesRoute("gpt-5.6-terra", "GPT-5.6 Terra"),
+        OpenAiResponsesRoute("gpt-5.6-luna", "GPT-5.6 Luna"),
         OpenAiResponsesRoute("gpt-5.5", "GPT-5.5"),
-        OpenAiResponsesRoute("gpt-5", "GPT-5", upstreamModel: "gpt-5.5"),
-        OpenAiResponsesRoute("gpt-5.4", "GPT-5.4"),
-        OpenAiResponsesRoute("gpt-5.4-mini", "GPT-5.4 Mini"),
-        OpenAiResponsesRoute("gpt-5.3-codex", "GPT-5.3 Codex")
+        OpenAiResponsesRoute("gpt-5.4", "GPT-5.4")
     ];
 
     public static IReadOnlyList<ProviderTemplateModel> AnthropicModels { get; } =
     [
+        AnthropicRoute("claude-fable-5-1", "Claude Fable 5.1"),
+        AnthropicRoute("claude-opus-5", "Claude Opus 5"),
+        AnthropicRoute("claude-sonnet-5", "Claude Sonnet 5"),
+        AnthropicRoute("claude-haiku-4-5", "Claude Haiku 4.5", upstreamModel: "claude-haiku-4-5-20251001"),
         AnthropicRoute("sonnet", "Claude Code Sonnet", upstreamModel: "claude-sonnet-4-5-20250929"),
         AnthropicRoute("opus", "Claude Code Opus", upstreamModel: "claude-opus-4-5-20251101"),
         AnthropicRoute("haiku", "Claude Code Haiku", upstreamModel: "claude-haiku-4-5-20251001"),
@@ -63,19 +64,25 @@ public static class BuiltInModelCatalog
 
     public static IReadOnlyList<ProviderTemplateModel> DeepSeekModels { get; } =
     [
-        OpenAiChatRoute("deepseek-v4-flash", "DeepSeek V4 Flash"),
-        OpenAiChatRoute("deepseek-v4-pro", "DeepSeek V4 Pro"),
-        OpenAiChatRoute("deepseek-chat", "DeepSeek Chat"),
-        OpenAiChatRoute("deepseek-reasoner", "DeepSeek Reasoner")
+        OpenAiResponsesRoute("deepseek-flash", "DeepSeek Flash"),
+        OpenAiResponsesRoute("deepseek-v4-flash", "DeepSeek V4 Flash"),
+        OpenAiResponsesRoute("deepseek-v4-pro", "DeepSeek V4 Pro"),
+        OpenAiResponsesRoute("deepseek-chat", "DeepSeek Chat"),
+        OpenAiResponsesRoute("deepseek-reasoner", "DeepSeek Reasoner")
     ];
 
     public static IReadOnlyList<ProviderTemplateModel> XiaomiModels { get; } =
     [
-        OpenAiChatRoute("mimo-v2.5-pro", "MiMo V2.5 Pro"),
-        OpenAiChatRoute("mimo-v2-pro", "MiMo V2 Pro"),
-        OpenAiChatRoute("mimo-v2.5", "MiMo V2.5"),
-        OpenAiChatRoute("mimo-v2-omni", "MiMo V2 Omni"),
-        OpenAiChatRoute("mimo-v2-flash", "MiMo V2 Flash")
+        OpenAiResponsesRoute("mimo-v2.5-pro", "MiMo V2.5 Pro"),
+        OpenAiResponsesRoute("mimo-v2-pro", "MiMo V2 Pro"),
+        OpenAiResponsesRoute("mimo-v2.5", "MiMo V2.5"),
+        OpenAiResponsesRoute("mimo-v2-omni", "MiMo V2 Omni"),
+        OpenAiResponsesRoute("mimo-v2-flash", "MiMo V2 Flash")
+    ];
+
+    public static IReadOnlyList<ProviderTemplateModel> GrokModels { get; } =
+    [
+        OpenAiResponsesRoute("grok-4.6", "Grok 4.6")
     ];
 
     public static FastModePricing CreateFastModePricing()
@@ -91,7 +98,6 @@ public static class BuiltInModelCatalog
     {
         return new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gpt-5"] = 2.5m,
             ["gpt-5.5*"] = 2.5m
         };
     }
@@ -121,16 +127,6 @@ public static class BuiltInModelCatalog
                 aliases: ["gpt-5.6-sol*"],
                 contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
             CreateRule(
-                "gpt-5.6",
-                "GPT-5.6",
-                "openai",
-                Tiered(OpenAiLongContextThresholdTokens, 5m, 10m),
-                Tiered(OpenAiLongContextThresholdTokens, 0.50m, 1m),
-                Tiered(OpenAiLongContextThresholdTokens, 6.25m, 12.50m),
-                Tiered(OpenAiLongContextThresholdTokens, 30m, 45m),
-                aliases: ["gpt-5.6*"],
-                contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
-            CreateRule(
                 "gpt-5.5",
                 "GPT-5.5",
                 "openai",
@@ -138,7 +134,7 @@ public static class BuiltInModelCatalog
                 Tiered(OpenAiLongContextThresholdTokens, 0.50m, 1m),
                 new TokenPriceTable(),
                 Tiered(OpenAiLongContextThresholdTokens, 30m, 45m),
-                aliases: ["gpt-5", "gpt-5.5*"],
+                aliases: ["gpt-5.5*"],
                 contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
             CreateRule(
                 "gpt-5.6-terra",
@@ -150,15 +146,6 @@ public static class BuiltInModelCatalog
                 Tiered(OpenAiLongContextThresholdTokens, 12m, 18m),
                 aliases: ["gpt-5.6-terra*"],
                 contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
-            CreateRule(
-                "gpt-5.4-mini",
-                "GPT-5.4 Mini",
-                "openai",
-                Flat(0.75m),
-                Flat(0.075m),
-                new TokenPriceTable(),
-                Flat(4.5m),
-                aliases: ["gpt-5.4-mini*"]),
             CreateRule(
                 "gpt-5.6-luna",
                 "GPT-5.6 Luna",
@@ -185,24 +172,24 @@ public static class BuiltInModelCatalog
             CreateRule("claude-sonnet-5", "Claude Sonnet 5", "claude", Flat(2m), Flat(0.20m), Flat(2.50m), Flat(10m), cacheCreationInput1Hour: Flat(4m)),
             CreateRule("claude-haiku-4-5-20251001", "Claude Haiku 4.5", "claude", Flat(1m), Flat(0.10m), Flat(1.25m), Flat(5m), aliases: ["claude-haiku-4-5"], cacheCreationInput1Hour: Flat(2m)),
 
+            // DeepSeek uses time-based peak/off-peak pricing; this static rule uses peak rates to avoid underestimating cost.
             CreateRule(
-                "deepseek-v4-flash",
-                "DeepSeek V4 Flash",
+                "deepseek-flash",
+                "DeepSeek Flash",
                 "deepseek",
-                Flat(0.14m),
-                Flat(0.0028m),
+                Flat(0.30m),
+                Flat(0.006m),
                 new TokenPriceTable(),
-                Flat(0.28m),
-                aliases: ["deepseek-chat", "deepseek-reasoner"]),
-            // Official DeepSeek pricing currently lists V4 Pro at a promotional rate through 2026-05-31 15:59 UTC.
+                Flat(1.20m),
+                aliases: ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-chat", "deepseek-reasoner"]),
             CreateRule(
                 "deepseek-v4-pro",
                 "DeepSeek V4 Pro",
                 "deepseek",
-                Flat(0.435m),
-                Flat(0.003625m),
+                Flat(1.32m),
+                Flat(0.044m),
                 new TokenPriceTable(),
-                Flat(0.87m)),
+                Flat(3.96m)),
 
             CreateRule(
                 "mimo-v2.5-pro",

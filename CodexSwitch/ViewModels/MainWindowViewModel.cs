@@ -45,6 +45,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private IconCacheService _iconCacheService = null!;
     private ProviderAuthService _providerAuthService = null!;
     private ProviderUsageQueryService _providerUsageQueryService = null!;
+    private ProviderModelDiscoveryService _providerModelDiscoveryService = null!;
     private CodexOAuthLoginService _codexOAuthLoginService = null!;
     private CodexOAuthJsonImportService _codexOAuthJsonImportService = null!;
     private CodexQuotaProbeService _codexQuotaProbeService = null!;
@@ -80,6 +81,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private bool _isLoadingProviderFields;
     private bool _isLoadingClaudeCodeFields;
     private bool _isUpdatingUsageFilterOptions;
+    private bool _isSyncingProviderToCodex;
+    private bool _isRefreshingProviderModels;
     private bool _hasUsageDashboardSnapshot;
     private UsageTimeRange _lastUsageDashboardRange;
     private DateTimeOffset _lastUsageWindowAnchor;
@@ -632,6 +635,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         RestartProxyCommand = new AsyncRelayCommand(RestartProxyAsync);
         StopProxyCommand = new AsyncRelayCommand(StopProxyAsync);
         SelectProviderCommand = new RelayCommand<ProviderListItem>(row => _ = ActivateProviderAsync(row));
+        SyncProviderToCodexCommand = new AsyncRelayCommand<ProviderListItem>(SyncProviderToCodexAsync);
         ChangeProviderDefaultModelCommand = new RelayCommand<ProviderDefaultModelChange>(change => _ = ChangeProviderDefaultModelAsync(change));
         SelectClaudeCodeModelCommand = new RelayCommand<string>(SelectClaudeCodeModel);
         SaveClaudeCodeSettingsCommand = new AsyncRelayCommand(SaveClaudeCodeSettingsAsync);
@@ -660,6 +664,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         AddModelConversionCommand = new RelayCommand(AddModelConversion);
         RemoveModelConversionCommand = new RelayCommand<ModelConversionEditorItem>(RemoveModelConversion);
         AddPricingModelCommand = new RelayCommand(OpenAddModel);
+        RefreshProviderModelsCommand = new AsyncRelayCommand(RefreshProviderModelsAsync);
         EditPricingModelCommand = new RelayCommand<ModelCatalogItem>(OpenEditModel);
         RequestRemovePricingModelCommand = new RelayCommand<ModelCatalogItem>(RequestRemovePricingModel);
         CancelRemovePricingModelCommand = new RelayCommand(() => IsDeleteModelDialogOpen = false);
@@ -813,6 +818,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public IRelayCommand<ProviderListItem> SelectProviderCommand { get; }
 
+    public IAsyncRelayCommand<ProviderListItem> SyncProviderToCodexCommand { get; }
+
     public IRelayCommand<ProviderDefaultModelChange> ChangeProviderDefaultModelCommand { get; }
 
     public IRelayCommand<string> SelectClaudeCodeModelCommand { get; }
@@ -868,6 +875,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     public IRelayCommand<ModelConversionEditorItem> RemoveModelConversionCommand { get; }
 
     public IRelayCommand AddPricingModelCommand { get; }
+
+    public IAsyncRelayCommand RefreshProviderModelsCommand { get; }
 
     public IRelayCommand<ModelCatalogItem> EditPricingModelCommand { get; }
 
@@ -936,6 +945,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _iconCacheService = new IconCacheService(_paths, _sharedHttpClient);
         _providerAuthService = new ProviderAuthService(_store, _config, _sharedHttpClient);
         _providerUsageQueryService = new ProviderUsageQueryService(_sharedHttpClient, _providerAuthService);
+        _providerModelDiscoveryService = new ProviderModelDiscoveryService(_sharedHttpClient, _providerAuthService);
         _codexOAuthLoginService = new CodexOAuthLoginService(_sharedHttpClient);
         _codexOAuthJsonImportService = new CodexOAuthJsonImportService(new CodexOAuthHelper(_sharedHttpClient));
         _codexQuotaProbeService = new CodexQuotaProbeService(_sharedHttpClient, _providerAuthService);
@@ -1559,6 +1569,175 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         SelectProvider(FindProviderRow(row.ClientApp, row.Id));
         if (_config.Proxy.Enabled)
             await ReloadProxyConfigAsync();
+    }
+
+    private async Task SyncProviderToCodexAsync(ProviderListItem? row)
+    {
+        if (_isSyncingProviderToCodex ||
+            row is null ||
+            row.ClientApp != ClientAppKind.Codex)
+        {
+            return;
+        }
+
+        var provider = _config.Providers.FirstOrDefault(item =>
+            string.Equals(item.Id, row.Id, StringComparison.OrdinalIgnoreCase));
+        if (provider is null || !provider.SupportsCodex)
+            return;
+
+        if (!provider.Enabled)
+        {
+            StatusMessage = T("status.providerDisabled");
+            return;
+        }
+
+        if (!_config.Proxy.Enabled)
+        {
+            StatusMessage = T("status.providerSyncToCodexProxyDisabled");
+            return;
+        }
+
+        _isSyncingProviderToCodex = true;
+        try
+        {
+            StatusMessage = T("status.providerSyncingToCodex");
+            _config.ActiveCodexProviderId = provider.Id;
+            _config.ActiveProviderId = provider.Id;
+            // An explicit sync is consent to keep Codex pointed at the managed
+            // local proxy after future provider/model changes.
+            _config.Proxy.ManageCodexConfig = true;
+            ManageCodexConfig = true;
+            _store.SaveConfig(_config);
+            _codexConfigWriter.Apply(_config);
+
+            RefreshProviderRows();
+            RefreshModelCatalogRows();
+            SelectProvider(FindProviderRow(ClientAppKind.Codex, provider.Id));
+            await ReloadProxyConfigAsync();
+
+            if (_proxyHostService.State.Error is not null)
+            {
+                StatusMessage = F("status.providerSyncToCodexFailed", _proxyHostService.State.Error);
+                return;
+            }
+
+            var clientOpened = await Task.Run(_codexDesktopClientLauncher.TryRestart);
+            var providerName = string.IsNullOrWhiteSpace(provider.DisplayName)
+                ? provider.Id
+                : provider.DisplayName;
+            StatusMessage = clientOpened
+                ? F("status.providerSyncToCodexSucceeded", providerName)
+                : T("status.providerSyncToCodexClientUnavailable");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            StatusMessage = F("status.providerSyncToCodexFailed", ex.Message);
+        }
+        finally
+        {
+            _isSyncingProviderToCodex = false;
+        }
+    }
+
+    private async Task RefreshProviderModelsAsync()
+    {
+        if (_isRefreshingProviderModels)
+            return;
+
+        var provider = ResolveActiveCodexProvider();
+        if (provider is null)
+        {
+            StatusMessage = T("status.providerModelsRefreshNoProvider");
+            return;
+        }
+
+        if (!provider.Enabled)
+        {
+            StatusMessage = T("status.providerDisabled");
+            return;
+        }
+
+        if (!HasProviderCredential(provider))
+        {
+            StatusMessage = T("status.providerModelsRefreshNoCredential");
+            return;
+        }
+
+        _isRefreshingProviderModels = true;
+        var providerName = string.IsNullOrWhiteSpace(provider.DisplayName)
+            ? provider.Id
+            : provider.DisplayName;
+        try
+        {
+            StatusMessage = F("status.providerModelsRefreshing", providerName);
+            var routes = await _providerModelDiscoveryService.FetchRoutesAsync(provider, CancellationToken.None);
+            if (routes.Count == 0)
+            {
+                StatusMessage = F("status.providerModelsRefreshEmpty", providerName);
+                return;
+            }
+
+            provider.Models.Clear();
+            foreach (var route in routes)
+                provider.Models.Add(route);
+
+            if (string.IsNullOrWhiteSpace(provider.DefaultModel) ||
+                !routes.Any(route => string.Equals(route.Id, provider.DefaultModel, StringComparison.OrdinalIgnoreCase)))
+            {
+                provider.DefaultModel = routes[0].Id;
+            }
+
+            _store.SaveConfig(_config);
+            RefreshProviderRows();
+            RefreshModelCatalogRows();
+            SelectProvider(FindProviderRow(ClientAppKind.Codex, provider.Id));
+
+            var syncedToCodex = _config.Proxy.ManageCodexConfig &&
+                string.Equals(
+                    string.IsNullOrWhiteSpace(_config.ActiveCodexProviderId)
+                        ? _config.ActiveProviderId
+                        : _config.ActiveCodexProviderId,
+                    provider.Id,
+                    StringComparison.OrdinalIgnoreCase);
+            if (syncedToCodex)
+            {
+                _codexConfigWriter.Apply(_config);
+                if (_config.Proxy.Enabled)
+                    await ReloadProxyConfigAsync();
+            }
+
+            StatusMessage = syncedToCodex
+                ? F("status.providerModelsRefreshSucceededAndSynced", providerName, routes.Count)
+                : F("status.providerModelsRefreshSucceeded", providerName, routes.Count);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or UnauthorizedAccessException or InvalidOperationException or TaskCanceledException)
+        {
+            StatusMessage = F("status.providerModelsRefreshFailed", ex.Message);
+        }
+        finally
+        {
+            _isRefreshingProviderModels = false;
+        }
+    }
+
+    private ProviderConfig? ResolveActiveCodexProvider()
+    {
+        var providerId = string.IsNullOrWhiteSpace(_config.ActiveCodexProviderId)
+            ? _config.ActiveProviderId
+            : _config.ActiveCodexProviderId;
+        return _config.Providers.FirstOrDefault(item =>
+            item.SupportsCodex &&
+            string.Equals(item.Id, providerId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool HasProviderCredential(ProviderConfig provider)
+    {
+        if (provider.AuthMode != ProviderAuthMode.OAuth)
+            return !string.IsNullOrWhiteSpace(provider.ApiKey);
+
+        return provider.OAuthAccounts.Any(account =>
+            account.IsEnabled &&
+            !string.IsNullOrWhiteSpace(account.AccessToken));
     }
 
     private async Task ChangeProviderDefaultModelAsync(ProviderDefaultModelChange? change)
@@ -3125,6 +3304,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             IsSelected = string.Equals(provider.Id, SelectedProviderId, StringComparison.OrdinalIgnoreCase),
             IsPinned = provider.IsPinned,
             SelectCommand = SelectProviderCommand,
+            SyncToCodexCommand = SyncProviderToCodexCommand,
             ChangeDefaultModelCommand = ChangeProviderDefaultModelCommand,
             TogglePinCommand = ToggleProviderPinCommand,
             EditCommand = EditProviderCommand,
@@ -5478,6 +5658,8 @@ public sealed partial class ProviderListItem : ObservableObject
 
     public bool IsNotPinned => !IsPinned;
 
+    public bool IsCodexProvider => ClientApp == ClientAppKind.Codex;
+
     public string UsageSummary { get; set; } = "";
 
     public string UsageMeta { get; set; } = "";
@@ -5497,6 +5679,8 @@ public sealed partial class ProviderListItem : ObservableObject
     public bool IsUsageValid { get; set; }
 
     public IRelayCommand<ProviderListItem>? SelectCommand { get; init; }
+
+    public IAsyncRelayCommand<ProviderListItem>? SyncToCodexCommand { get; init; }
 
     public IRelayCommand<ProviderDefaultModelChange>? ChangeDefaultModelCommand { get; init; }
 

@@ -5,6 +5,7 @@ namespace CodexSwitch.Services;
 public sealed class CodexConfigWriter
 {
     public const string ManagedProviderId = "meteor-ai";
+    public const string ManagedModelCatalogFileName = "codexswitch-model-catalog.json";
     private const string ManagedProviderName = "meteor-ai";
     private const string ManagedModel = CodexSwitchDefaults.ManagedCodexModel;
     private const string DefaultInboundApiKey = "sk-codex";
@@ -13,6 +14,7 @@ public sealed class CodexConfigWriter
     private static readonly string[] RootManagedKeyOrder =
     [
         "model",
+        "model_catalog_json",
         "model_provider",
         "service_tier",
         "disable_response_storage",
@@ -83,6 +85,7 @@ public sealed class CodexConfigWriter
     public void Apply(AppConfig config)
     {
         Directory.CreateDirectory(_paths.CodexDirectory);
+        WriteModelCatalog(config);
         WriteConfigToml(config);
         if (config.Proxy.UseFakeCodexAppAuth)
             WriteFakeAuthJson();
@@ -96,6 +99,7 @@ public sealed class CodexConfigWriter
     {
         ManagedFileBackup.RestoreOriginal(_paths.CodexConfigPath);
         ManagedFileBackup.RestoreOriginal(_paths.CodexAuthPath);
+        ManagedFileBackup.RestoreOriginal(_paths.CodexModelCatalogPath);
     }
 
     private void WriteConfigToml(AppConfig config)
@@ -176,8 +180,10 @@ public sealed class CodexConfigWriter
     private static string MergeConfigToml(string existing, AppConfig config)
     {
         var sections = ParseTomlSections(existing);
-        var rootAssignments = CreateRootAssignments(config);
-        var providerAssignments = CreateProviderAssignments(BuildClientEndpoint(config.Proxy), ShouldEnableWebSockets(config));
+        var rootAssignments = CreateRootAssignments(existing, config);
+        var providerAssignments = CreateProviderAssignments(
+            BuildClientEndpoint(config.Proxy),
+            ShouldEnableWebSockets(config));
         var featureAssignments = CreateFeatureAssignments();
         var windowsAssignments = CreateWindowsAssignments();
 
@@ -224,11 +230,20 @@ public sealed class CodexConfigWriter
         return SerializeTomlSections(sections);
     }
 
-    private static Dictionary<string, string?> CreateRootAssignments(AppConfig config)
+    private static Dictionary<string, string?> CreateRootAssignments(string existing, AppConfig config)
     {
+        var provider = ResolveActiveCodexProvider(config);
+        var reasoningEffort = NormalizeReasoningEffort(
+            ReadTomlStringAssignment(existing, "model_reasoning_effort"));
         return new Dictionary<string, string?>(StringComparer.Ordinal)
         {
-            ["model"] = FormatTomlString(ManagedModel),
+            ["model"] = FormatTomlString(
+                string.IsNullOrWhiteSpace(provider?.DefaultModel)
+                    ? ManagedModel
+                    : provider.DefaultModel.Trim()),
+            ["model_catalog_json"] = HasModelCatalog(provider)
+                ? FormatTomlString(ManagedModelCatalogFileName)
+                : null,
             ["model_provider"] = FormatTomlString(ManagedProviderId),
             ["service_tier"] = ShouldEnableFastServiceTier(config) ? FormatTomlString("fast") : null,
             ["disable_response_storage"] = "true",
@@ -236,14 +251,16 @@ public sealed class CodexConfigWriter
             ["sandbox_mode"] = FormatTomlString("danger-full-access"),
             ["model_supports_reasoning_summaries"] = "true",
             ["rmcp_client"] = "true",
-            ["model_reasoning_effort"] = FormatTomlString("xhigh"),
+            ["model_reasoning_effort"] = FormatTomlString(reasoningEffort),
             ["model_context_window"] = ShouldEnableOneMillionContext(config) ? OneMillionContextWindowTokens.ToString(CultureInfo.InvariantCulture) : null,
             ["model_auto_compact_token_limit"] = ShouldEnableOneMillionContext(config) ? OneMillionAutoCompactTokenLimit.ToString(CultureInfo.InvariantCulture) : null,
             ["personality"] = FormatTomlString("friendly")
         };
     }
 
-    private static Dictionary<string, string?> CreateProviderAssignments(string endpoint, bool supportsWebSockets)
+    private static Dictionary<string, string?> CreateProviderAssignments(
+        string endpoint,
+        bool supportsWebSockets)
     {
         return new Dictionary<string, string?>(StringComparer.Ordinal)
         {
@@ -508,6 +525,234 @@ public sealed class CodexConfigWriter
         return config.Providers.FirstOrDefault(item =>
             item.SupportsCodex &&
             string.Equals(item.Id, providerId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void WriteModelCatalog(AppConfig config)
+    {
+        var provider = ResolveActiveCodexProvider(config);
+        if (!HasModelCatalog(provider))
+        {
+            RemoveManagedModelCatalog();
+            return;
+        }
+
+        var catalog = BuildModelCatalog(provider!);
+        var json = JsonSerializer.Serialize(
+                catalog,
+                CodexSwitchJsonContext.Default.CodexModelCatalog) +
+            Environment.NewLine;
+        WriteTextIfChanged(_paths.CodexModelCatalogPath, json);
+    }
+
+    private void RemoveManagedModelCatalog()
+    {
+        ManagedFileBackup.RestoreOriginal(_paths.CodexModelCatalogPath);
+    }
+
+    private static bool HasModelCatalog(ProviderConfig? provider)
+    {
+        return provider is not null &&
+            provider.SupportsCodex &&
+            (!string.IsNullOrWhiteSpace(provider.DefaultModel) || provider.Models.Count > 0);
+    }
+
+    private static CodexModelCatalog BuildModelCatalog(ProviderConfig provider)
+    {
+        var models = new List<CodexModelCatalogEntry>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var templateModel in ResolveTemplateModels(provider))
+        {
+            var id = templateModel.Id.Trim();
+            if (!seen.Add(id))
+                continue;
+
+            var route = provider.Models.FirstOrDefault(item =>
+                string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
+            models.Add(BuildModelCatalogEntry(
+                id,
+                string.IsNullOrWhiteSpace(route?.DisplayName)
+                    ? string.IsNullOrWhiteSpace(templateModel.DisplayName) ? id : templateModel.DisplayName!.Trim()
+                    : route.DisplayName!.Trim(),
+                1000 + models.Count,
+                provider.Codex?.EnableOneMillionContext == true ? 1_000_000 : 128_000,
+                route?.ServiceTier ?? templateModel.ServiceTier ?? provider.ServiceTier,
+                route?.Cost?.FastMode == true || templateModel.FastMode || provider.Cost?.FastMode == true));
+        }
+
+        foreach (var route in provider.Models.Where(route => !string.IsNullOrWhiteSpace(route.Id)))
+        {
+            var id = route.Id.Trim();
+            if (!seen.Add(id))
+                continue;
+
+            models.Add(BuildModelCatalogEntry(
+                id,
+                string.IsNullOrWhiteSpace(route.DisplayName) ? id : route.DisplayName!.Trim(),
+                1000 + models.Count,
+                provider.Codex?.EnableOneMillionContext == true ? 1_000_000 : 128_000,
+                route.ServiceTier ?? provider.ServiceTier,
+                route.Cost?.FastMode == true || provider.Cost?.FastMode == true));
+        }
+
+        if (models.Count == 0 && !string.IsNullOrWhiteSpace(provider.DefaultModel))
+        {
+            var id = provider.DefaultModel.Trim();
+            models.Add(BuildModelCatalogEntry(
+                id,
+                id,
+                1000,
+                provider.Codex?.EnableOneMillionContext == true ? 1_000_000 : 128_000,
+                provider.ServiceTier,
+                provider.Cost?.FastMode == true));
+        }
+
+        return new CodexModelCatalog { Models = models };
+    }
+
+    private static IReadOnlyList<ProviderTemplateModel> ResolveTemplateModels(ProviderConfig provider)
+    {
+        if (!string.IsNullOrWhiteSpace(provider.BuiltinId))
+            return ProviderTemplateCatalog.Find(provider.BuiltinId)?.Models ?? [];
+
+        if (provider.Protocol == ProviderProtocol.OpenAiResponses &&
+            provider.Models.Any(route => IsGptModel(route.Id)))
+        {
+            return BuiltInModelCatalog.OpenAiOfficialModels;
+        }
+
+        return [];
+    }
+
+    private static bool IsGptModel(string? modelId)
+    {
+        return !string.IsNullOrWhiteSpace(modelId) &&
+            (modelId.StartsWith("gpt-", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("codex-", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static CodexModelCatalogEntry BuildModelCatalogEntry(
+        string id,
+        string displayName,
+        int priority,
+        int contextWindow,
+        string? serviceTier,
+        bool fastMode)
+    {
+        var reasoningLevels = new List<CodexReasoningLevel>
+        {
+            new CodexReasoningLevel
+            {
+                Effort = "none",
+                Description = "Disable Thinking"
+            },
+            new CodexReasoningLevel
+            {
+                Effort = "low",
+                Description = "Fast responses with lighter reasoning"
+            },
+            new CodexReasoningLevel
+            {
+                Effort = "medium",
+                Description = "Balances speed and reasoning depth for everyday tasks"
+            },
+            new CodexReasoningLevel
+            {
+                Effort = "high",
+                Description = "Greater reasoning depth for complex problems"
+            },
+            new CodexReasoningLevel
+            {
+                Effort = "xhigh",
+                Description = "Extra high reasoning depth for complex problems"
+            },
+            new CodexReasoningLevel
+            {
+                Effort = "max",
+                Description = "Maximum reasoning depth for the hardest tasks"
+            }
+        };
+
+        return new CodexModelCatalogEntry
+        {
+            Slug = id,
+            DisplayName = displayName,
+            Description = displayName,
+            BaseInstructions = "You are Codex, a coding agent. Collaborate with the user and use the available tools to complete the task.",
+            ModelMessages = new CodexModelMessages(),
+            DefaultReasoningLevel = "medium",
+            SupportedReasoningLevels = reasoningLevels,
+            ShellType = "shell_command",
+            Visibility = "list",
+            SupportedInApi = true,
+            Priority = priority,
+            AdditionalSpeedTiers = fastMode ? ["fast"] : [],
+            ServiceTiers = string.IsNullOrWhiteSpace(serviceTier)
+                ? []
+                : [new CodexServiceTier
+                {
+                    Id = serviceTier,
+                    Name = string.Equals(serviceTier, "priority", StringComparison.OrdinalIgnoreCase) ? "Fast" : serviceTier,
+                    Description = "Increased speed tier"
+                }],
+            AvailabilityNux = null,
+            Upgrade = null,
+            SupportsReasoningSummaries = true,
+            DefaultReasoningSummary = "none",
+            SupportVerbosity = true,
+            DefaultVerbosity = "low",
+            ApplyPatchToolType = "freeform",
+            WebSearchToolType = "text_and_image",
+            TruncationPolicy = new CodexTruncationPolicy
+            {
+                Mode = "tokens",
+                Limit = 10_000
+            },
+            SupportsParallelToolCalls = true,
+            SupportsImageDetailOriginal = true,
+            ContextWindow = contextWindow,
+            MaxContextWindow = contextWindow,
+            EffectiveContextWindowPercent = 95,
+            ExperimentalSupportedTools = [],
+            InputModalities = ["text", "image"],
+            SupportsSearchTool = true
+        };
+    }
+
+    private static string? ReadTomlStringAssignment(string text, string key)
+    {
+        using var reader = new StringReader(text);
+        string? line;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            if (!TryParseTomlAssignment(line, out var parsedKey, out _)
+                || !string.Equals(parsedKey, key, StringComparison.Ordinal))
+                continue;
+
+            var equalsIndex = line.IndexOf('=');
+            if (equalsIndex < 0)
+                continue;
+
+            var value = line[(equalsIndex + 1)..].Trim();
+            if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+                return value[1..^1].Replace("\\\"", "\"", StringComparison.Ordinal).Replace("\\\\", "\\", StringComparison.Ordinal);
+        }
+
+        return null;
+    }
+
+    private static string NormalizeReasoningEffort(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "none" => "none",
+            "low" => "low",
+            "medium" => "medium",
+            "high" => "high",
+            "xhigh" => "xhigh",
+            "max" => "max",
+            _ => "medium"
+        };
     }
 
     private void WriteTextIfChanged(string path, string content, string? existing = null)

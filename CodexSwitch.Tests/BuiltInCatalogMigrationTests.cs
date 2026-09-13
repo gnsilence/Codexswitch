@@ -75,10 +75,8 @@ public sealed class BuiltInCatalogMigrationTests
                 [
                     "gpt-6-astra",
                     "gpt-5.6-sol",
-                    "gpt-5.6",
                     "gpt-5.5",
                     "gpt-5.6-terra",
-                    "gpt-5.4-mini",
                     "gpt-5.6-luna",
                     "codex-auto-review"
                 ],
@@ -101,7 +99,7 @@ public sealed class BuiltInCatalogMigrationTests
                     .Select(rule => rule.Id));
             Assert.DoesNotContain(upgraded.Models, rule => rule.Id == "claude-opus-4-7");
             Assert.DoesNotContain(upgraded.Models, rule => rule.Id == "claude-3-5-sonnet");
-            Assert.Contains(upgraded.Models, rule => rule.Id == "deepseek-v4-flash");
+            Assert.Contains(upgraded.Models, rule => rule.Id == "deepseek-flash");
             Assert.Contains(upgraded.Models, rule => rule.Id == "deepseek-v4-pro");
             Assert.Contains(upgraded.Models, rule => rule.Id == "mimo-v2.5-pro");
             Assert.Contains(upgraded.Models, rule => rule.Id == "mimo-v2.5");
@@ -110,9 +108,10 @@ public sealed class BuiltInCatalogMigrationTests
             Assert.Equal(5m, gpt55.Input.Tiers[0].PricePerUnit);
             Assert.Equal(BuiltInModelCatalog.OpenAiLongContextThresholdTokens, gpt55.Input.Tiers[0].UpToTokens);
             Assert.True(upgraded.FastMode.ModelOverrides.ContainsKey("gpt-5.5*"));
-            Assert.True(upgraded.FastMode.ModelOverrides.ContainsKey("gpt-5"));
+            Assert.False(upgraded.FastMode.ModelOverrides.ContainsKey("gpt-5"));
 
-            var deepSeekFlash = Assert.Single(upgraded.Models, rule => rule.Id == "deepseek-v4-flash");
+            var deepSeekFlash = Assert.Single(upgraded.Models, rule => rule.Id == "deepseek-flash");
+            Assert.Contains("deepseek-v4-flash", deepSeekFlash.Aliases);
             Assert.Contains("deepseek-chat", deepSeekFlash.Aliases);
             Assert.Contains("deepseek-reasoner", deepSeekFlash.Aliases);
 
@@ -133,18 +132,25 @@ public sealed class BuiltInCatalogMigrationTests
 
         AssertGptPricing(rules, "gpt-6-astra", 10m, 20m, 1m, 2m, 12.50m, 25m, 50m, 75m);
         AssertGptPricing(rules, "gpt-5.6-sol", 5m, 10m, 0.50m, 1m, 6.25m, 12.50m, 30m, 45m);
-        AssertGptPricing(rules, "gpt-5.6", 5m, 10m, 0.50m, 1m, 6.25m, 12.50m, 30m, 45m);
         AssertGptPricing(rules, "gpt-5.5", 5m, 10m, 0.50m, 1m, null, null, 30m, 45m);
         AssertGptPricing(rules, "gpt-5.6-terra", 2m, 4m, 0.20m, 0.40m, 2.50m, 5m, 12m, 18m);
         AssertGptPricing(rules, "gpt-5.6-luna", 0.20m, 0.40m, 0.02m, 0.04m, 0.25m, 0.50m, 1.20m, 1.80m);
         AssertGptPricing(rules, "codex-auto-review", 0.20m, 0.40m, 0.02m, 0.04m, 0.25m, 0.50m, 1.20m, 1.80m);
 
-        var mini = Assert.Single(rules, rule => rule.Id == "gpt-5.4-mini");
-        Assert.Null(mini.ContextPricingThresholdTokens);
-        AssertFlatPrice(mini.Input, 0.75m);
-        AssertFlatPrice(mini.CachedInput, 0.075m);
-        Assert.Empty(mini.CacheCreationInput.Tiers);
-        AssertFlatPrice(mini.Output, 4.50m);
+        Assert.DoesNotContain(rules, rule => rule.Id == "gpt-5.4-mini");
+        Assert.DoesNotContain(rules, rule => rule.Id == "gpt-5.6");
+    }
+
+    [Fact]
+    public void AiossTemplates_UseFullOpenAiModelCatalog()
+    {
+        var aiossPlus = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.AiossPlusBuiltinId, []);
+
+        Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-6-astra");
+        Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-5.6-sol");
+        Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-5.6-terra");
+        Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-5.6-luna");
+        Assert.True(aiossPlus.Models.Count > 2);
     }
 
     [Fact]
@@ -163,6 +169,39 @@ public sealed class BuiltInCatalogMigrationTests
         Assert.Contains("claude-haiku-4-5", Assert.Single(
             rules,
             rule => rule.Id == "claude-haiku-4-5-20251001").Aliases);
+    }
+
+    [Fact]
+    public void BuiltInPricing_UsesCurrentDeepSeekPeakRates()
+    {
+        var rules = BuiltInModelCatalog.CreatePricingRules();
+
+        var flash = Assert.Single(rules, rule => rule.Id == "deepseek-flash");
+        Assert.Equal("deepseek", flash.IconSlug);
+        AssertFlatPrice(flash.Input, 0.30m);
+        AssertFlatPrice(flash.CachedInput, 0.006m);
+        AssertFlatPrice(flash.Output, 1.20m);
+        Assert.Contains("deepseek-v4-flash", flash.Aliases);
+        Assert.Contains("deepseek-chat", flash.Aliases);
+        Assert.Contains("deepseek-reasoner", flash.Aliases);
+
+        var pro = Assert.Single(rules, rule => rule.Id == "deepseek-v4-pro");
+        AssertFlatPrice(pro.Input, 1.32m);
+        AssertFlatPrice(pro.CachedInput, 0.044m);
+        AssertFlatPrice(pro.Output, 3.96m);
+    }
+
+    [Fact]
+    public void AnthropicTemplate_IncludesCurrentClaudeRoutesForCodexSync()
+    {
+        var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.AnthropicBuiltinId, []);
+
+        Assert.Equal("claude-sonnet-4-5", provider.DefaultModel);
+        Assert.Contains(provider.Models, model => model.Id == "claude-fable-5-1");
+        Assert.Contains(provider.Models, model => model.Id == "claude-opus-5");
+        Assert.Contains(provider.Models, model => model.Id == "claude-sonnet-5");
+        Assert.Contains(provider.Models, model => model.Id == "claude-haiku-4-5");
+        Assert.All(provider.Models, model => Assert.Equal(ProviderProtocol.AnthropicMessages, model.Protocol));
     }
 
     [Fact]
@@ -236,7 +275,7 @@ public sealed class BuiltInCatalogMigrationTests
     }
 
     [Fact]
-    public void LoadConfig_ExpandsBuiltInProviderModelLists()
+    public void LoadConfig_PreservesExistingBuiltInProviderModelLists()
     {
         var root = CreateTempDirectory();
         try
@@ -288,12 +327,12 @@ public sealed class BuiltInCatalogMigrationTests
             var aiossPro = Assert.Single(upgraded.Providers, provider =>
                 string.Equals(provider.BuiltinId, ProviderTemplateCatalog.AiossProBuiltinId, StringComparison.OrdinalIgnoreCase));
 
-            Assert.Contains(openAi.Models, model => model.Id == "gpt-5.4");
-            Assert.Contains(openAi.Models, model => model.Id == "gpt-5.4-mini");
-            Assert.Contains(openAi.Models, model => model.Id == "gpt-5.3-codex");
+            Assert.DoesNotContain(openAi.Models, model => model.Id == "gpt-5.4");
+            Assert.DoesNotContain(openAi.Models, model => model.Id == "gpt-5.4-mini");
+            Assert.DoesNotContain(openAi.Models, model => model.Id == "gpt-5.3-codex");
             AssertDefaultConversion(openAi);
-            Assert.Contains(anthropic.Models, model => model.Id == "claude-opus-4-7");
-            Assert.Contains(anthropic.Models, model => model.Id == "claude-3-5-sonnet");
+            Assert.DoesNotContain(anthropic.Models, model => model.Id == "claude-opus-4-7");
+            Assert.DoesNotContain(anthropic.Models, model => model.Id == "claude-3-5-sonnet");
             AssertDefaultConversion(anthropic);
             AssertAiossProvider(aiossPlus, ProviderTemplateCatalog.AiossPlusBuiltinId);
             AssertAiossProvider(aiossPro, ProviderTemplateCatalog.AiossProBuiltinId);
@@ -309,14 +348,17 @@ public sealed class BuiltInCatalogMigrationTests
     }
 
     [Fact]
-    public void DeepSeekTemplate_UsesOpenAiChatEndpointAndRoutes()
+    public void DeepSeekTemplate_UsesOpenAiResponsesEndpointAndRoutes()
     {
         var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.DeepSeekBuiltinId, []);
 
-        Assert.Equal("https://api.deepseek.com/v1", provider.BaseUrl);
-        Assert.Equal(ProviderProtocol.OpenAiChat, provider.Protocol);
+        Assert.Equal(ProviderTemplateCatalog.AiossBaseUrl, provider.BaseUrl);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, provider.Protocol);
+        Assert.Equal("deepseek-flash", provider.DefaultModel);
         Assert.True(provider.SupportsClaudeCode);
-        Assert.All(provider.Models, model => Assert.Equal(ProviderProtocol.OpenAiChat, model.Protocol));
+        Assert.Contains(provider.Models, model => model.Id == "deepseek-flash");
+        Assert.Contains(provider.Models, model => model.Id == "deepseek-v4-flash");
+        Assert.All(provider.Models, model => Assert.Equal(ProviderProtocol.OpenAiResponses, model.Protocol));
     }
 
     [Fact]
@@ -324,8 +366,8 @@ public sealed class BuiltInCatalogMigrationTests
     {
         var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.XiaomiBuiltinId, []);
 
-        Assert.Equal(ProviderTemplateCatalog.OpenAiOfficialBaseUrl, provider.BaseUrl);
-        Assert.Equal(ProviderProtocol.OpenAiChat, provider.Protocol);
+        Assert.Equal(ProviderTemplateCatalog.AiossBaseUrl, provider.BaseUrl);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, provider.Protocol);
         Assert.Contains(provider.Models, model => model.Id == "mimo-v2.5-pro");
         Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.4");
         AssertDefaultConversion(provider);
@@ -344,14 +386,165 @@ public sealed class BuiltInCatalogMigrationTests
         ConfigurationStore.EnsureValidDefaults(config);
 
         Assert.Equal(ProviderTemplateCatalog.XiaomiBuiltinId, provider.BuiltinId);
-        Assert.Equal(ProviderTemplateCatalog.OpenAiOfficialBaseUrl, provider.BaseUrl);
+        Assert.Equal(ProviderTemplateCatalog.AiossBaseUrl, provider.BaseUrl);
         Assert.Equal("mimo-v2.5-pro", provider.DefaultModel);
         Assert.Contains(provider.Models, model => model.Id == "mimo-v2.5-pro");
         Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.4");
     }
 
     [Fact]
-    public void EnsureValidDefaults_MigratesLegacyXiaomiEndpointToOpenAiEndpoint()
+    public void GrokTemplate_UsesAiossEndpointAndGrok46Route()
+    {
+        var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.GrokBuiltinId, []);
+
+        Assert.Equal(ProviderTemplateCatalog.AiossBaseUrl, provider.BaseUrl);
+        Assert.Equal("grok-4.6", provider.DefaultModel);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, provider.Protocol);
+        Assert.True(provider.SupportsCodex);
+        Assert.False(provider.SupportsClaudeCode);
+        Assert.False(provider.SupportsWebSockets == true);
+
+        var route = Assert.Single(provider.Models);
+        Assert.Equal("grok-4.6", route.Id);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, route.Protocol);
+        Assert.Equal(UsageQueryTemplateCatalog.AiossTemplateId, provider.UsageQuery?.TemplateId);
+        Assert.True(provider.UsageQuery?.Enabled == true);
+    }
+
+    [Fact]
+    public void LoadConfig_MigratesAiossOpenAiCompatibleBuiltInsToResponsesProtocol()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root, Path.Combine(root, ".codex"));
+            var store = new ConfigurationStore(paths);
+            var config = new AppConfig
+            {
+                SchemaVersion = 2,
+                ActiveProviderId = "deepseek",
+                Providers =
+                {
+                    new ProviderConfig
+                    {
+                        Id = "deepseek",
+                        BuiltinId = ProviderTemplateCatalog.DeepSeekBuiltinId,
+                        BaseUrl = ProviderTemplateCatalog.AiossBaseUrl,
+                        Protocol = ProviderProtocol.OpenAiChat,
+                        DefaultModel = "deepseek-v4-flash",
+                        Models =
+                        {
+                            new ModelRouteConfig
+                            {
+                                Id = "deepseek-v4-flash",
+                                Protocol = ProviderProtocol.OpenAiChat
+                            }
+                        }
+                    }
+                }
+            };
+
+            WriteJson(paths.ConfigPath, config);
+
+            var reloaded = store.LoadConfig();
+            var provider = Assert.Single(
+                reloaded.Providers,
+                item => string.Equals(item.BuiltinId, ProviderTemplateCatalog.DeepSeekBuiltinId, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(3, reloaded.SchemaVersion);
+            Assert.Equal(ProviderProtocol.OpenAiResponses, provider.Protocol);
+            Assert.All(provider.Models, route => Assert.Equal(ProviderProtocol.OpenAiResponses, route.Protocol));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void NewBuiltInProviderTemplates_UseAiossEndpointAndUsageQuery()
+    {
+        foreach (var template in ProviderTemplateCatalog.VisibleTemplates.Where(template => !template.IsCustom))
+        {
+            var provider = ProviderTemplateCatalog.CreateProvider(template.Id, []);
+
+            Assert.Equal(ProviderTemplateCatalog.AiossBaseUrl, provider.BaseUrl);
+            Assert.Equal(UsageQueryTemplateCatalog.AiossTemplateId, provider.UsageQuery?.TemplateId);
+            Assert.True(provider.UsageQuery?.Enabled == true);
+        }
+    }
+
+    [Fact]
+    public void SaveConfig_PreservesEditedBuiltInProviderFieldsDuringMigration()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root, Path.Combine(root, ".codex"));
+            var store = new ConfigurationStore(paths);
+            var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.DeepSeekBuiltinId, []);
+            provider.BaseUrl = "https://custom.example/v1";
+            provider.Protocol = ProviderProtocol.AnthropicMessages;
+            provider.Note = "custom note";
+            provider.Website = "https://custom.example";
+            provider.SupportsWebSockets = true;
+            provider.Cost!.Multiplier = 0.42m;
+
+            var config = new AppConfig
+            {
+                SchemaVersion = 1,
+                ActiveProviderId = provider.Id,
+                Providers = { provider }
+            };
+
+            store.SaveConfig(config);
+            var reloaded = store.LoadConfig();
+            var saved = Assert.Single(reloaded.Providers, item => item.Id == provider.Id);
+
+            Assert.Equal(3, reloaded.SchemaVersion);
+            Assert.Equal("https://custom.example/v1", saved.BaseUrl);
+            Assert.Equal(ProviderProtocol.AnthropicMessages, saved.Protocol);
+            Assert.Equal("custom note", saved.Note);
+            Assert.Equal("https://custom.example", saved.Website);
+            Assert.True(saved.SupportsWebSockets == true);
+            Assert.Equal(0.42m, saved.Cost?.Multiplier);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SaveConfig_DoesNotRestoreRemovedModelsForCurrentSchema()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root, Path.Combine(root, ".codex"));
+            var store = new ConfigurationStore(paths);
+            var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.GrokBuiltinId, []);
+            provider.Models.Clear();
+
+            var config = new AppConfig
+            {
+                SchemaVersion = 3,
+                ActiveProviderId = provider.Id,
+                Providers = { provider }
+            };
+
+            store.SaveConfig(config);
+            var reloaded = store.LoadConfig();
+
+            Assert.Empty(Assert.Single(reloaded.Providers, item => item.Id == provider.Id).Models);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EnsureValidDefaults_PreservesLegacyXiaomiEndpoint()
     {
         var provider = new ProviderConfig
         {
@@ -370,7 +563,7 @@ public sealed class BuiltInCatalogMigrationTests
 
         ConfigurationStore.EnsureValidDefaults(config);
 
-        Assert.Equal(ProviderTemplateCatalog.OpenAiOfficialBaseUrl, provider.BaseUrl);
+        Assert.Equal(ProviderTemplateCatalog.XiaomiLegacyBaseUrl, provider.BaseUrl);
         Assert.Equal(ProviderTemplateCatalog.XiaomiBuiltinId, provider.BuiltinId);
         Assert.Contains(provider.Models, model => model.Id == "mimo-v2.5-pro");
         Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.4");
@@ -435,7 +628,7 @@ public sealed class BuiltInCatalogMigrationTests
     }
 
     [Fact]
-    public void LoadConfig_MigratesLegacyDeepSeekBuiltinToOpenAiChat()
+    public void LoadConfig_PreservesLegacyDeepSeekEndpointAndProtocol()
     {
         var root = CreateTempDirectory();
         try
@@ -470,10 +663,10 @@ public sealed class BuiltInCatalogMigrationTests
             var deepSeek = Assert.Single(upgraded.Providers, provider => provider.Id == "deepseek");
 
             Assert.Equal(ProviderTemplateCatalog.DeepSeekBuiltinId, deepSeek.BuiltinId);
-            Assert.Equal("https://api.deepseek.com/v1", deepSeek.BaseUrl);
-            Assert.Equal(ProviderProtocol.OpenAiChat, deepSeek.Protocol);
+            Assert.Equal("https://api.deepseek.com/anthropic", deepSeek.BaseUrl);
+            Assert.Equal(ProviderProtocol.AnthropicMessages, deepSeek.Protocol);
             Assert.Equal("deepseek-chat", deepSeek.DefaultModel);
-            Assert.All(deepSeek.Models, model => Assert.Equal(ProviderProtocol.OpenAiChat, model.Protocol));
+            Assert.All(deepSeek.Models, model => Assert.Equal(ProviderProtocol.AnthropicMessages, model.Protocol));
         }
         finally
         {
@@ -492,8 +685,8 @@ public sealed class BuiltInCatalogMigrationTests
         var mimoV2Pro = Assert.Single(provider.Models, model => model.Id == "mimo-v2-pro");
         var mimoV25Pro = Assert.Single(provider.Models, model => model.Id == "mimo-v2.5-pro");
 
-        Assert.Equal(ProviderProtocol.OpenAiChat, deepSeekFlash.Protocol);
-        Assert.Equal(ProviderProtocol.OpenAiChat, deepSeekPro.Protocol);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, deepSeekFlash.Protocol);
+        Assert.Equal(ProviderProtocol.OpenAiResponses, deepSeekPro.Protocol);
         Assert.Equal(ProviderProtocol.OpenAiResponses, mimoFlash.Protocol);
         Assert.Equal(ProviderProtocol.OpenAiResponses, mimoV2Pro.Protocol);
         Assert.Equal(ProviderProtocol.OpenAiResponses, mimoV25Pro.Protocol);
@@ -517,7 +710,7 @@ public sealed class BuiltInCatalogMigrationTests
     }
 
     [Fact]
-    public void EnsureValidDefaults_MigratesRoutinAiDeepSeekRoutesToOpenAiChat()
+    public void EnsureValidDefaults_PreservesEditedRoutinAiDeepSeekRoutes()
     {
         var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.RoutinAiBuiltinId, []);
         foreach (var route in provider.Models.Where(route => route.Id.StartsWith("deepseek-", StringComparison.OrdinalIgnoreCase)))
@@ -532,10 +725,10 @@ public sealed class BuiltInCatalogMigrationTests
         ConfigurationStore.EnsureValidDefaults(config);
 
         Assert.Equal(
-            ProviderProtocol.OpenAiChat,
+            ProviderProtocol.OpenAiResponses,
             provider.Models.Single(route => route.Id == "deepseek-v4-flash").Protocol);
         Assert.Equal(
-            ProviderProtocol.OpenAiChat,
+            ProviderProtocol.OpenAiResponses,
             provider.Models.Single(route => route.Id == "deepseek-v4-pro").Protocol);
     }
 
@@ -548,9 +741,9 @@ public sealed class BuiltInCatalogMigrationTests
             var paths = new AppPaths(root, Path.Combine(root, ".codex"));
             var store = new ConfigurationStore(paths);
             var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.RoutinAiBuiltinId, []);
-            var route = provider.Models.Single(model => model.Id == "gpt-5");
+            var route = provider.Models.Single(model => model.Id == "gpt-5.5");
             route.DisplayName = "Custom GPT";
-            route.Protocol = ProviderProtocol.OpenAiChat;
+            route.Protocol = ProviderProtocol.AnthropicMessages;
             route.UpstreamModel = null;
             route.ServiceTier = null;
             route.Cost = new ProviderCostSettings { FastMode = false };
@@ -564,10 +757,10 @@ public sealed class BuiltInCatalogMigrationTests
             store.SaveConfig(config);
             var reloaded = store.LoadConfig();
             var reloadedProvider = Assert.Single(reloaded.Providers, item => item.Id == provider.Id);
-            var reloadedRoute = reloadedProvider.Models.Single(model => model.Id == "gpt-5");
+            var reloadedRoute = reloadedProvider.Models.Single(model => model.Id == "gpt-5.5");
 
             Assert.Equal("Custom GPT", reloadedRoute.DisplayName);
-            Assert.Equal(ProviderProtocol.OpenAiChat, reloadedRoute.Protocol);
+            Assert.Equal(ProviderProtocol.AnthropicMessages, reloadedRoute.Protocol);
             Assert.Null(reloadedRoute.UpstreamModel);
             Assert.Null(reloadedRoute.ServiceTier);
             var cost = Assert.IsType<ProviderCostSettings>(reloadedRoute.Cost);
@@ -612,7 +805,7 @@ public sealed class BuiltInCatalogMigrationTests
 
         var listings = ProviderRoutingResolver.CollectModelListings(config);
         var gpt54 = Assert.Single(listings, item => item.Id == "gpt-5.4");
-        var deepSeekFlash = Assert.Single(listings, item => item.Id == "deepseek-v4-flash");
+        var deepSeekFlash = Assert.Single(listings, item => item.Id == "deepseek-flash");
         var mimoPro = Assert.Single(listings, item => item.Id == "mimo-v2.5-pro");
         Assert.Contains("openai-official", gpt54.ProviderIds);
         Assert.Contains("deepseek", deepSeekFlash.ProviderIds);
@@ -776,6 +969,7 @@ public sealed class BuiltInCatalogMigrationTests
                 "https://platform.xiaomimimo.com/static/favicon.874c9507.png",
                 icons.GetIconUrl("xiaomi"));
             Assert.Equal("xiaomi", IconCacheService.ResolveModelIconSlug("mimo-v2.5-pro"));
+            Assert.Equal("grok", IconCacheService.ResolveModelIconSlug("grok-4.6"));
         }
         finally
         {
@@ -829,8 +1023,12 @@ public sealed class BuiltInCatalogMigrationTests
         Assert.False(provider.Cost?.FastMode ?? true);
         Assert.Equal(0.13m, provider.Cost?.Multiplier);
 
-        var model = Assert.Single(provider.Models);
-        Assert.Equal(CodexSwitchDefaults.ManagedCodexModel, model.Id);
+        Assert.Contains(provider.Models, model => model.Id == "gpt-6-astra");
+        Assert.Contains(provider.Models, model => model.Id == "gpt-5.6-sol");
+        Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.6");
+        Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.4-mini");
+        Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.3-codex");
+        var model = Assert.Single(provider.Models, model => model.Id == CodexSwitchDefaults.ManagedCodexModel);
         Assert.Equal(ProviderProtocol.OpenAiResponses, model.Protocol);
         Assert.Null(model.UpstreamModel);
         Assert.Null(model.ServiceTier);

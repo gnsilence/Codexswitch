@@ -115,6 +115,285 @@ public sealed class CodexConfigWriterTests : IDisposable
     }
 
     [Fact]
+    public void Apply_WritesManagedModelCatalogForActiveProvider()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "catalog-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "catalog-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        var writer = new CodexConfigWriter(paths);
+
+        writer.Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "deepseek",
+            ActiveProviderId = "deepseek",
+            Proxy = { ManageCodexConfig = true },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "deepseek",
+                    SupportsCodex = true,
+                    DefaultModel = "deepseek-v4-flash",
+                    Models =
+                    {
+                        new ModelRouteConfig
+                        {
+                            Id = "deepseek-v4-flash",
+                            DisplayName = "DeepSeek V4 Flash",
+                            Protocol = ProviderProtocol.OpenAiChat
+                        },
+                        new ModelRouteConfig
+                        {
+                            Id = "deepseek-v4-pro",
+                            DisplayName = "DeepSeek V4 Pro",
+                            Protocol = ProviderProtocol.OpenAiChat
+                        }
+                    }
+                }
+            }
+        });
+
+        var configToml = File.ReadAllText(paths.CodexConfigPath);
+        Assert.Contains("model = \"deepseek-v4-flash\"", configToml, StringComparison.Ordinal);
+        Assert.Contains(
+            $"model_catalog_json = \"{CodexConfigWriter.ManagedModelCatalogFileName}\"",
+            configToml,
+            StringComparison.Ordinal);
+
+        using var catalog = JsonDocument.Parse(File.ReadAllText(paths.CodexModelCatalogPath));
+        var models = catalog.RootElement.GetProperty("models");
+        Assert.Equal(2, models.GetArrayLength());
+        Assert.Equal("deepseek-v4-flash", models[0].GetProperty("slug").GetString());
+        Assert.Equal("DeepSeek V4 Pro", models[1].GetProperty("display_name").GetString());
+        Assert.True(models[0].GetProperty("model_messages").ValueKind == JsonValueKind.Object);
+        Assert.True(models[0].GetProperty("supports_reasoning_summaries").GetBoolean());
+    }
+
+    [Fact]
+    public void Apply_WritesBuiltInProviderModelCatalogsForCodexSync()
+    {
+        AssertBuiltInCatalogIncludes(
+            ProviderTemplateCatalog.DeepSeekBuiltinId,
+            "deepseek-flash",
+            "deepseek-v4-pro");
+        AssertBuiltInCatalogIncludes(
+            ProviderTemplateCatalog.AnthropicBuiltinId,
+            "claude-sonnet-5",
+            "claude-sonnet-4-5");
+        AssertBuiltInCatalogIncludes(
+            ProviderTemplateCatalog.GrokBuiltinId,
+            "grok-4.6");
+    }
+
+    [Fact]
+    public void Apply_MergesBuiltInGptRoutesAndWritesAllReasoningLevels()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "gpt-catalog-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "gpt-catalog-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        var writer = new CodexConfigWriter(paths);
+
+        writer.Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "custom-gpt",
+            ActiveProviderId = "custom-gpt",
+            Proxy = { ManageCodexConfig = true },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "custom-gpt",
+                    Protocol = ProviderProtocol.OpenAiResponses,
+                    SupportsCodex = true,
+                    DefaultModel = "gpt-5.5",
+                    Models =
+                    {
+                        new ModelRouteConfig
+                        {
+                            Id = "gpt-5.5",
+                            DisplayName = "My GPT 5.5",
+                            Protocol = ProviderProtocol.OpenAiResponses
+                        },
+                        new ModelRouteConfig
+                        {
+                            Id = "custom-model",
+                            Protocol = ProviderProtocol.OpenAiResponses
+                        }
+                    }
+                }
+            }
+        });
+
+        using var catalog = JsonDocument.Parse(File.ReadAllText(paths.CodexModelCatalogPath));
+        var models = catalog.RootElement.GetProperty("models");
+        var slugs = models.EnumerateArray()
+            .Select(model => model.GetProperty("slug").GetString())
+            .ToArray();
+        Assert.Contains("gpt-6-astra", slugs);
+        Assert.Contains("gpt-5.6-sol", slugs);
+        Assert.Contains("gpt-5.6-terra", slugs);
+        Assert.Contains("gpt-5.6-luna", slugs);
+        Assert.DoesNotContain("gpt-5", slugs);
+        Assert.DoesNotContain("gpt-5.4-mini", slugs);
+        Assert.DoesNotContain("gpt-5.3-codex", slugs);
+        Assert.Contains("custom-model", slugs);
+        Assert.Equal("My GPT 5.5", models.EnumerateArray()
+            .Single(model => model.GetProperty("slug").GetString() == "gpt-5.5")
+            .GetProperty("display_name").GetString());
+
+        var reasoningLevels = models[0].GetProperty("supported_reasoning_levels")
+            .EnumerateArray()
+            .Select(level => level.GetProperty("effort").GetString() ?? "")
+            .ToArray();
+        Assert.Equal(["none", "low", "medium", "high", "xhigh", "max"], reasoningLevels);
+        Assert.Equal("medium", models[0].GetProperty("default_reasoning_level").GetString());
+    }
+
+    [Fact]
+    public void Apply_DefaultsRootReasoningEffortToMediumAndPreservesExistingSelection()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "reasoning-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "reasoning-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"high\"\n");
+
+        var writer = new CodexConfigWriter(paths);
+        writer.Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "gpt",
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "gpt",
+                    Protocol = ProviderProtocol.OpenAiResponses,
+                    SupportsCodex = true,
+                    DefaultModel = "gpt-5.5"
+                }
+            }
+        });
+
+        Assert.Contains("model_reasoning_effort = \"high\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_NormalizesUnsupportedRootReasoningEffort()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "reasoning-invalid-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "reasoning-invalid-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"ultra\"\n");
+
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "gpt",
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "gpt",
+                    Protocol = ProviderProtocol.OpenAiResponses,
+                    SupportsCodex = true,
+                    DefaultModel = "gpt-5.5"
+                }
+            }
+        });
+
+        Assert.Contains("model_reasoning_effort = \"medium\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_PreservesMaxRootReasoningEffort()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "reasoning-max-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "reasoning-max-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"max\"\n");
+
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "gpt",
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "gpt",
+                    Protocol = ProviderProtocol.OpenAiResponses,
+                    SupportsCodex = true,
+                    DefaultModel = "gpt-5.5"
+                }
+            }
+        });
+
+        Assert.Contains("model_reasoning_effort = \"max\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RestoreOriginal_RestoresManagedModelCatalog()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "catalog-restore-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "catalog-restore-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexModelCatalogPath, "{\"models\":[{\"slug\":\"before\"}]}\n");
+
+        var writer = new CodexConfigWriter(paths);
+        writer.Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "deepseek",
+            Proxy = { ManageCodexConfig = true },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "deepseek",
+                    SupportsCodex = true,
+                    DefaultModel = "deepseek-v4-flash"
+                }
+            }
+        });
+
+        Assert.Contains("deepseek-v4-flash", File.ReadAllText(paths.CodexModelCatalogPath), StringComparison.Ordinal);
+        writer.RestoreOriginal();
+        Assert.Contains("\"before\"", File.ReadAllText(paths.CodexModelCatalogPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_WithoutActiveCodexProvider_RemovesManagedModelCatalog()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "catalog-remove-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "catalog-remove-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        var writer = new CodexConfigWriter(paths);
+        var config = new AppConfig
+        {
+            ActiveCodexProviderId = "deepseek",
+            Proxy = { ManageCodexConfig = true },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "deepseek",
+                    SupportsCodex = true,
+                    DefaultModel = "deepseek-v4-flash"
+                }
+            }
+        };
+
+        writer.Apply(config);
+        Assert.True(File.Exists(paths.CodexModelCatalogPath));
+
+        config.ActiveCodexProviderId = "missing";
+        writer.Apply(config);
+
+        Assert.False(File.Exists(paths.CodexModelCatalogPath));
+        Assert.False(File.Exists(paths.CodexModelCatalogPath + ".absent"));
+    }
+
+    [Fact]
     public void Apply_WritesCodexOneMillionContext_ForCustomCodexProviderWhenEnabled()
     {
         var appRoot = Path.Combine(_tempDirectory, "codex-1m-custom-appdata");
@@ -541,6 +820,38 @@ public sealed class CodexConfigWriterTests : IDisposable
     private static string BackupPath(string path)
     {
         return path + ".bak";
+    }
+
+    private void AssertBuiltInCatalogIncludes(string templateId, params string[] expectedModelIds)
+    {
+        var appRoot = Path.Combine(_tempDirectory, templateId + "-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, templateId + "-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        var provider = ProviderTemplateCatalog.CreateProvider(templateId, []);
+
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            ActiveProviderId = provider.Id,
+            ActiveCodexProviderId = provider.Id,
+            Providers = { provider }
+        });
+
+        using var catalog = JsonDocument.Parse(File.ReadAllText(paths.CodexModelCatalogPath));
+        var models = catalog.RootElement.GetProperty("models").EnumerateArray().ToArray();
+        var slugs = models
+            .Select(model => model.GetProperty("slug").GetString())
+            .ToArray();
+        foreach (var expectedModelId in expectedModelIds)
+        {
+            Assert.Contains(expectedModelId, slugs);
+            var model = models.Single(item => item.GetProperty("slug").GetString() == expectedModelId);
+            var reasoningLevels = model.GetProperty("supported_reasoning_levels")
+                .EnumerateArray()
+                .Select(level => level.GetProperty("effort").GetString() ?? "")
+                .ToArray();
+            Assert.Equal(["none", "low", "medium", "high", "xhigh", "max"], reasoningLevels);
+            Assert.Equal("medium", model.GetProperty("default_reasoning_level").GetString());
+        }
     }
 
     public void Dispose()

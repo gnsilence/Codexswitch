@@ -144,6 +144,7 @@ public sealed class IconCacheService
             EnsureIconAsync("claude", theme, cancellationToken),
             EnsureIconAsync("deepseek", theme, cancellationToken),
             EnsureIconAsync("xiaomi", theme, cancellationToken),
+            EnsureIconAsync("grok", theme, cancellationToken),
             EnsureIconAsync("gemini", theme, cancellationToken),
             EnsureIconAsync(RoutinAiIconSlug, cancellationToken));
     }
@@ -162,6 +163,8 @@ public sealed class IconCacheService
             return "gemini";
         if (normalized.StartsWith("mimo", StringComparison.Ordinal))
             return "xiaomi";
+        if (normalized.StartsWith("grok", StringComparison.Ordinal))
+            return "grok";
         if (normalized.StartsWith("gpt", StringComparison.Ordinal) ||
             normalized.StartsWith("o1", StringComparison.Ordinal) ||
             normalized.StartsWith("o3", StringComparison.Ordinal) ||

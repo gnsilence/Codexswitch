@@ -11,6 +11,7 @@ public static class ProviderTemplateCatalog
     public const string AnthropicBuiltinId = "anthropic";
     public const string DeepSeekBuiltinId = "deepseek";
     public const string XiaomiBuiltinId = "xiaomi-mimo";
+    public const string GrokBuiltinId = "grok";
     public const string CodexOAuthBuiltinId = "codex-oauth";
     public const string AiossBaseUrl = "https://aioss.cc/v1";
     public const string OpenAiOfficialBaseUrl = "https://api.openai.com/v1";
@@ -28,6 +29,7 @@ public static class ProviderTemplateCatalog
             Description = "Manually configure the provider endpoint and model routes.",
             IconSlug = "openai",
             IsCustom = true,
+            BaseUrl = AiossBaseUrl,
             SupportsCodex = true
         },
         new()
@@ -99,9 +101,9 @@ public static class ProviderTemplateCatalog
             Id = OpenAiOfficialBuiltinId,
             BuiltinId = OpenAiOfficialBuiltinId,
             DisplayName = "OpenAI Official",
-            Description = "Official OpenAI Responses API",
+            Description = "OpenAI Responses API via the default AIOSS relay",
             Website = "https://platform.openai.com",
-            BaseUrl = OpenAiOfficialBaseUrl,
+            BaseUrl = AiossBaseUrl,
             Protocol = ProviderProtocol.OpenAiResponses,
             DefaultModel = CodexSwitchDefaults.ManagedCodexModel,
             IconSlug = "openai",
@@ -113,9 +115,9 @@ public static class ProviderTemplateCatalog
             Id = AnthropicBuiltinId,
             BuiltinId = AnthropicBuiltinId,
             DisplayName = "Anthropic Messages",
-            Description = "Official Claude Messages API",
+            Description = "Claude Messages API via the default AIOSS relay",
             Website = "https://console.anthropic.com",
-            BaseUrl = "https://api.anthropic.com/v1",
+            BaseUrl = AiossBaseUrl,
             Protocol = ProviderProtocol.AnthropicMessages,
             DefaultModel = "claude-sonnet-4-5",
             IconSlug = "claude",
@@ -128,11 +130,11 @@ public static class ProviderTemplateCatalog
             Id = DeepSeekBuiltinId,
             BuiltinId = DeepSeekBuiltinId,
             DisplayName = "DeepSeek",
-            Description = "Official DeepSeek OpenAI-compatible chat API",
+            Description = "DeepSeek OpenAI-compatible chat API via the default AIOSS relay",
             Website = "https://platform.deepseek.com",
-            BaseUrl = "https://api.deepseek.com/v1",
-            Protocol = ProviderProtocol.OpenAiChat,
-            DefaultModel = "deepseek-v4-flash",
+            BaseUrl = AiossBaseUrl,
+            Protocol = ProviderProtocol.OpenAiResponses,
+            DefaultModel = "deepseek-flash",
             IconSlug = "deepseek",
             SupportsCodex = true,
             SupportsClaudeCode = true,
@@ -143,14 +145,28 @@ public static class ProviderTemplateCatalog
             Id = XiaomiBuiltinId,
             BuiltinId = XiaomiBuiltinId,
             DisplayName = "Xiaomi MiMo",
-            Description = "Official Xiaomi MiMo OpenAI-compatible chat API",
+            Description = "Xiaomi MiMo OpenAI-compatible chat API via the default AIOSS relay",
             Website = "https://platform.xiaomimimo.com",
-            BaseUrl = OpenAiOfficialBaseUrl,
-            Protocol = ProviderProtocol.OpenAiChat,
+            BaseUrl = AiossBaseUrl,
+            Protocol = ProviderProtocol.OpenAiResponses,
             DefaultModel = "mimo-v2.5-pro",
             IconSlug = "xiaomi",
             SupportsCodex = true,
             Models = BuiltInModelCatalog.XiaomiModels
+        },
+        new()
+        {
+            Id = GrokBuiltinId,
+            BuiltinId = GrokBuiltinId,
+            DisplayName = "Grok",
+            Description = "Grok OpenAI-compatible chat API",
+            Website = "https://x.ai",
+            BaseUrl = AiossBaseUrl,
+            Protocol = ProviderProtocol.OpenAiResponses,
+            DefaultModel = "grok-4.6",
+            IconSlug = "grok",
+            SupportsCodex = true,
+            Models = BuiltInModelCatalog.GrokModels
         }
     ];
 
@@ -253,7 +269,7 @@ public static class ProviderTemplateCatalog
             Note = template.Description,
             Website = template.Website,
             IconSlug = template.IconSlug,
-            BaseUrl = template.IsCustom ? "https://api.example.com/v1" : template.BaseUrl,
+            BaseUrl = template.BaseUrl,
             ApiKey = "",
             AuthMode = template.AuthMode,
             Protocol = template.Protocol,
@@ -403,8 +419,7 @@ public static class ProviderTemplateCatalog
 
     private static ProviderUsageQueryConfig CreateDefaultUsageQuery(ProviderTemplate template)
     {
-        if (string.Equals(template.BuiltinId, AiossPlusBuiltinId, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(template.BuiltinId, AiossProBuiltinId, StringComparison.OrdinalIgnoreCase))
+        if (IsAiossUsageProvider(template.BuiltinId))
         {
             return UsageQueryTemplateCatalog.CreateQuery(UsageQueryTemplateCatalog.AiossTemplateId);
         }
@@ -416,6 +431,17 @@ public static class ProviderTemplateCatalog
             return UsageQueryTemplateCatalog.CreateQuery(UsageQueryTemplateCatalog.RoutinAiPlanTemplateId);
 
         return UsageQueryTemplateCatalog.CreateQuery(UsageQueryTemplateCatalog.CustomTemplateId);
+    }
+
+    public static bool IsAiossUsageProvider(string? builtinId)
+    {
+        return string.Equals(builtinId, AiossPlusBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, AiossProBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, OpenAiOfficialBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, AnthropicBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, DeepSeekBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, XiaomiBuiltinId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builtinId, GrokBuiltinId, StringComparison.OrdinalIgnoreCase);
     }
 
     private static ProviderRequestOverrides? CloneOverrides(ProviderRequestOverrides? source)
