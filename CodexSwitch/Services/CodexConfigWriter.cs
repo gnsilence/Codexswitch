@@ -9,6 +9,7 @@ public sealed class CodexConfigWriter
     private const string ManagedProviderName = "meteor-ai";
     private const string ManagedModel = CodexSwitchDefaults.ManagedCodexModel;
     private const string DefaultInboundApiKey = "sk-codex";
+    private const int DefaultContextWindowTokens = 272_000;
     private const int OneMillionContextWindowTokens = 1_000_000;
     private const int OneMillionAutoCompactTokenLimit = 900_000;
     private static readonly string[] RootManagedKeyOrder =
@@ -234,7 +235,8 @@ public sealed class CodexConfigWriter
     {
         var provider = ResolveActiveCodexProvider(config);
         var reasoningEffort = NormalizeReasoningEffort(
-            ReadTomlStringAssignment(existing, "model_reasoning_effort"));
+            ReadTomlStringAssignment(existing, "model_reasoning_effort"),
+            provider?.DefaultModel);
         return new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["model"] = FormatTomlString(
@@ -560,6 +562,9 @@ public sealed class CodexConfigWriter
     {
         var models = new List<CodexModelCatalogEntry>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var contextWindow = provider.Codex?.EnableOneMillionContext == true
+            ? OneMillionContextWindowTokens
+            : DefaultContextWindowTokens;
 
         foreach (var templateModel in ResolveTemplateModels(provider))
         {
@@ -575,7 +580,7 @@ public sealed class CodexConfigWriter
                     ? string.IsNullOrWhiteSpace(templateModel.DisplayName) ? id : templateModel.DisplayName!.Trim()
                     : route.DisplayName!.Trim(),
                 1000 + models.Count,
-                provider.Codex?.EnableOneMillionContext == true ? 1_000_000 : 128_000,
+                contextWindow,
                 route?.ServiceTier ?? templateModel.ServiceTier ?? provider.ServiceTier,
                 route?.Cost?.FastMode == true || templateModel.FastMode || provider.Cost?.FastMode == true));
         }
@@ -590,7 +595,7 @@ public sealed class CodexConfigWriter
                 id,
                 string.IsNullOrWhiteSpace(route.DisplayName) ? id : route.DisplayName!.Trim(),
                 1000 + models.Count,
-                provider.Codex?.EnableOneMillionContext == true ? 1_000_000 : 128_000,
+                contextWindow,
                 route.ServiceTier ?? provider.ServiceTier,
                 route.Cost?.FastMode == true || provider.Cost?.FastMode == true));
         }
@@ -602,7 +607,7 @@ public sealed class CodexConfigWriter
                 id,
                 id,
                 1000,
-                provider.Codex?.EnableOneMillionContext == true ? 1_000_000 : 128_000,
+                contextWindow,
                 provider.ServiceTier,
                 provider.Cost?.FastMode == true));
         }
@@ -639,40 +644,6 @@ public sealed class CodexConfigWriter
         string? serviceTier,
         bool fastMode)
     {
-        var reasoningLevels = new List<CodexReasoningLevel>
-        {
-            new CodexReasoningLevel
-            {
-                Effort = "none",
-                Description = "Disable Thinking"
-            },
-            new CodexReasoningLevel
-            {
-                Effort = "low",
-                Description = "Fast responses with lighter reasoning"
-            },
-            new CodexReasoningLevel
-            {
-                Effort = "medium",
-                Description = "Balances speed and reasoning depth for everyday tasks"
-            },
-            new CodexReasoningLevel
-            {
-                Effort = "high",
-                Description = "Greater reasoning depth for complex problems"
-            },
-            new CodexReasoningLevel
-            {
-                Effort = "xhigh",
-                Description = "Extra high reasoning depth for complex problems"
-            },
-            new CodexReasoningLevel
-            {
-                Effort = "max",
-                Description = "Maximum reasoning depth for the hardest tasks"
-            }
-        };
-
         return new CodexModelCatalogEntry
         {
             Slug = id,
@@ -681,7 +652,7 @@ public sealed class CodexConfigWriter
             BaseInstructions = "You are Codex, a coding agent. Collaborate with the user and use the available tools to complete the task.",
             ModelMessages = new CodexModelMessages(),
             DefaultReasoningLevel = "medium",
-            SupportedReasoningLevels = reasoningLevels,
+            SupportedReasoningLevels = CreateReasoningLevels(id),
             ShellType = "shell_command",
             Visibility = "list",
             SupportedInApi = true,
@@ -741,18 +712,68 @@ public sealed class CodexConfigWriter
         return null;
     }
 
-    private static string NormalizeReasoningEffort(string? value)
+    private static List<CodexReasoningLevel> CreateReasoningLevels(string modelId)
     {
-        return value?.Trim().ToLowerInvariant() switch
-        {
-            "none" => "none",
-            "low" => "low",
-            "medium" => "medium",
-            "high" => "high",
-            "xhigh" => "xhigh",
-            "max" => "max",
-            _ => "medium"
-        };
+        var efforts = ResolveReasoningEfforts(modelId);
+        return efforts
+            .Select(effort => new CodexReasoningLevel
+            {
+                Effort = effort,
+                Description = effort switch
+                {
+                    "low" => "Fast responses with lighter reasoning",
+                    "medium" => "Balances speed and reasoning depth for everyday tasks",
+                    "high" => "Greater reasoning depth for complex problems",
+                    "xhigh" => "Extra high reasoning depth for complex problems",
+                    "max" => "Maximum reasoning depth for the hardest tasks",
+                    "ultra" => "Ultra reasoning depth for the most demanding tasks",
+                    _ => "Disable Thinking"
+                }
+            })
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> ResolveReasoningEfforts(string? modelId)
+    {
+        if (IsUltraReasoningModel(modelId))
+            return ["low", "medium", "high", "xhigh", "max", "ultra"];
+
+        if (IsMaxReasoningModel(modelId))
+            return ["low", "medium", "high", "xhigh", "max"];
+
+        if (IsXHighReasoningModel(modelId))
+            return ["low", "medium", "high", "xhigh"];
+
+        return ["none", "low", "medium", "high", "xhigh", "max"];
+    }
+
+    private static bool IsUltraReasoningModel(string? modelId)
+    {
+        return !string.IsNullOrWhiteSpace(modelId) &&
+            (modelId.StartsWith("gpt-6-astra", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("gpt-5.6-sol", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("gpt-5.6-terra", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsMaxReasoningModel(string? modelId)
+    {
+        return !string.IsNullOrWhiteSpace(modelId) &&
+            modelId.StartsWith("gpt-5.6-luna", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsXHighReasoningModel(string? modelId)
+    {
+        return !string.IsNullOrWhiteSpace(modelId) &&
+            (modelId.StartsWith("gpt-5.5", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("gpt-5.4", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeReasoningEffort(string? value, string? modelId)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return ResolveReasoningEfforts(modelId).Contains(normalized ?? "", StringComparer.Ordinal)
+            ? normalized!
+            : "medium";
     }
 
     private void WriteTextIfChanged(string path, string content, string? existing = null)

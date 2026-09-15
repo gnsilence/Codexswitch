@@ -112,6 +112,11 @@ public sealed class CodexConfigWriterTests : IDisposable
         var configToml = File.ReadAllText(paths.CodexConfigPath);
         Assert.Contains("model_context_window = 1000000", configToml, StringComparison.Ordinal);
         Assert.Contains("model_auto_compact_token_limit = 900000", configToml, StringComparison.Ordinal);
+
+        using var catalog = JsonDocument.Parse(File.ReadAllText(paths.CodexModelCatalogPath));
+        var model = catalog.RootElement.GetProperty("models")[0];
+        Assert.Equal(1_000_000, model.GetProperty("context_window").GetInt32());
+        Assert.Equal(1_000_000, model.GetProperty("max_context_window").GetInt32());
     }
 
     [Fact]
@@ -167,6 +172,9 @@ public sealed class CodexConfigWriterTests : IDisposable
         Assert.Equal("DeepSeek V4 Pro", models[1].GetProperty("display_name").GetString());
         Assert.True(models[0].GetProperty("model_messages").ValueKind == JsonValueKind.Object);
         Assert.True(models[0].GetProperty("supports_reasoning_summaries").GetBoolean());
+        Assert.Equal(272_000, models[0].GetProperty("context_window").GetInt32());
+        Assert.Equal(272_000, models[0].GetProperty("max_context_window").GetInt32());
+        Assert.Equal(95, models[0].GetProperty("effective_context_window_percent").GetInt32());
     }
 
     [Fact]
@@ -245,8 +253,33 @@ public sealed class CodexConfigWriterTests : IDisposable
             .EnumerateArray()
             .Select(level => level.GetProperty("effort").GetString() ?? "")
             .ToArray();
-        Assert.Equal(["none", "low", "medium", "high", "xhigh", "max"], reasoningLevels);
+        Assert.Equal(["low", "medium", "high", "xhigh", "max", "ultra"], reasoningLevels);
         Assert.Equal("medium", models[0].GetProperty("default_reasoning_level").GetString());
+
+        Assert.Equal(
+            ["low", "medium", "high", "xhigh", "max", "ultra"],
+            models.EnumerateArray()
+                .Single(model => model.GetProperty("slug").GetString() == "gpt-5.6-terra")
+                .GetProperty("supported_reasoning_levels")
+                .EnumerateArray()
+                .Select(level => level.GetProperty("effort").GetString() ?? "")
+                .ToArray());
+        Assert.Equal(
+            ["low", "medium", "high", "xhigh", "max"],
+            models.EnumerateArray()
+                .Single(model => model.GetProperty("slug").GetString() == "gpt-5.6-luna")
+                .GetProperty("supported_reasoning_levels")
+                .EnumerateArray()
+                .Select(level => level.GetProperty("effort").GetString() ?? "")
+                .ToArray());
+        Assert.Equal(
+            ["low", "medium", "high", "xhigh"],
+            models.EnumerateArray()
+                .Single(model => model.GetProperty("slug").GetString() == "gpt-5.5")
+                .GetProperty("supported_reasoning_levels")
+                .EnumerateArray()
+                .Select(level => level.GetProperty("effort").GetString() ?? "")
+                .ToArray());
     }
 
     [Fact]
@@ -284,7 +317,7 @@ public sealed class CodexConfigWriterTests : IDisposable
         var codexRoot = Path.Combine(_tempDirectory, "reasoning-invalid-codex");
         var paths = new AppPaths(appRoot, codexRoot);
         Directory.CreateDirectory(paths.CodexDirectory);
-        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"ultra\"\n");
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"invalid\"\n");
 
         new CodexConfigWriter(paths).Apply(new AppConfig
         {
@@ -305,7 +338,7 @@ public sealed class CodexConfigWriterTests : IDisposable
     }
 
     [Fact]
-    public void Apply_PreservesMaxRootReasoningEffort()
+    public void Apply_PreservesMaxRootReasoningEffortForLatestModels()
     {
         var appRoot = Path.Combine(_tempDirectory, "reasoning-max-appdata");
         var codexRoot = Path.Combine(_tempDirectory, "reasoning-max-codex");
@@ -323,12 +356,39 @@ public sealed class CodexConfigWriterTests : IDisposable
                     Id = "gpt",
                     Protocol = ProviderProtocol.OpenAiResponses,
                     SupportsCodex = true,
-                    DefaultModel = "gpt-5.5"
+                    DefaultModel = "gpt-5.6-terra"
                 }
             }
         });
 
         Assert.Contains("model_reasoning_effort = \"max\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Apply_PreservesUltraRootReasoningEffortForLatestModels()
+    {
+        var appRoot = Path.Combine(_tempDirectory, "reasoning-ultra-appdata");
+        var codexRoot = Path.Combine(_tempDirectory, "reasoning-ultra-codex");
+        var paths = new AppPaths(appRoot, codexRoot);
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"ultra\"\n");
+
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "gpt",
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "gpt",
+                    Protocol = ProviderProtocol.OpenAiResponses,
+                    SupportsCodex = true,
+                    DefaultModel = "gpt-6-astra"
+                }
+            }
+        });
+
+        Assert.Contains("model_reasoning_effort = \"ultra\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
     }
 
     [Fact]

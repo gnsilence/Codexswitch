@@ -97,6 +97,39 @@ public sealed class AppViewMigrationTests
     }
 
     [Fact]
+    public void SidebarHelpNavigationOpensStructuredHelpPage()
+    {
+        var mainWindow = File.ReadAllText(Path.Combine(FindRepoDirectory("CodexSwitch", "Views"), "MainWindow.axaml"));
+        var viewModel = File.ReadAllText(Path.Combine(FindRepoDirectory("CodexSwitch", "ViewModels"), "MainWindowViewModel.cs"));
+        var helpPage = File.ReadAllText(FindRepoFile("CodexSwitch", "Views", "Pages", "HelpPage.axaml"));
+
+        Assert.Contains("Command=\"{Binding ShowHelpCommand}\"", mainWindow);
+        Assert.Contains("IsActive=\"{Binding IsHelpNavSelected}\"", mainWindow);
+        Assert.Contains("<pages:HelpPage IsVisible=\"{Binding IsHelpPageVisible}\"/>", mainWindow);
+        Assert.Contains("ShowHelpCommand = new RelayCommand(() => CurrentPage = \"Help\")", viewModel);
+        Assert.Contains("public bool IsHelpPageVisible => CurrentPage == \"Help\";", viewModel);
+        Assert.Contains("\"Help\" => T(\"help.title\")", viewModel);
+        Assert.Contains("{i18n:Tr help.quickStart.step1.title}", helpPage);
+        Assert.Contains("{i18n:Tr help.features.title}", helpPage);
+        Assert.Contains("{i18n:Tr help.providerGuide.title}", helpPage);
+        Assert.Contains("{i18n:Tr help.providerGuide.sync.item3}", helpPage);
+        Assert.Contains("{i18n:Tr help.providerGuide.types.item2}", helpPage);
+        Assert.Contains("{i18n:Tr help.providerGuide.flow.step5}", helpPage);
+        Assert.Contains("{i18n:Tr help.advanced.title}", helpPage);
+        Assert.Contains("{i18n:Tr help.notes.title}", helpPage);
+        Assert.Contains("{i18n:Tr help.troubleshooting.title}", helpPage);
+
+        foreach (var language in new[] { "zh-CN.json", "en-US.json", "ja-JP.json" })
+        {
+            var translations = File.ReadAllText(FindRepoFile("CodexSwitch", "Assets", "i18n", language));
+            Assert.Contains("\"nav.help\"", translations);
+            Assert.Contains("\"help.quickStart.step4.body\"", translations);
+            Assert.Contains("\"help.providerGuide.verify.body\"", translations);
+            Assert.Contains("\"help.troubleshooting.config.body\"", translations);
+        }
+    }
+
+    [Fact]
     public void SidebarPaletteParticipatesInThemeSwitching()
     {
         var source = File.ReadAllText(Path.Combine(FindRepoDirectory("CodexSwitch", "Services"), "AppThemeService.cs"));

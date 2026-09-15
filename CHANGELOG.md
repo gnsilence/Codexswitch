@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.0.5] - 2026-09-15
+
+### Added
+
+- Added an in-app help center with onboarding, feature guidance, advanced configuration, provider synchronization instructions, troubleshooting, and Chinese, English, and Japanese localization.
+
+### Changed
+
+- Updated generated Codex model catalogs to use a 272,000-token default context window and consistently apply the optional one-million-token context setting.
+- Tailored Codex reasoning-effort options to the selected model family, including `max` and `ultra` support for compatible models.
+
 ## [v0.0.4] - 2026-09-13
 
 ### Changed

@@ -83,10 +83,10 @@ public sealed class CodexModelCatalogEntry
     public bool SupportsImageDetailOriginal { get; set; } = true;
 
     [JsonPropertyName("context_window")]
-    public int ContextWindow { get; set; } = 128_000;
+    public int ContextWindow { get; set; } = 272_000;
 
     [JsonPropertyName("max_context_window")]
-    public int MaxContextWindow { get; set; } = 128_000;
+    public int MaxContextWindow { get; set; } = 272_000;
 
     [JsonPropertyName("effective_context_window_percent")]
     public int EffectiveContextWindowPercent { get; set; } = 95;

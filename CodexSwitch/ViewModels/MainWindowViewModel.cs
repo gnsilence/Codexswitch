@@ -619,6 +619,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         ShowCodexSessionsCommand = new RelayCommand(ShowCodexSessions);
         ShowUsageCommand = new RelayCommand(() => CurrentPage = "Usage");
         ShowModelsCommand = new RelayCommand(() => CurrentPage = "Models");
+        ShowHelpCommand = new RelayCommand(() => CurrentPage = "Help");
         OpenSettingsCommand = new RelayCommand(OpenSettings);
         BackFromSettingsCommand = new RelayCommand(BackFromSettings);
         SelectSettingsTabCommand = new RelayCommand<string>(tab => SettingsTab = tab ?? "General");
@@ -785,6 +786,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     public IRelayCommand ShowUsageCommand { get; }
 
     public IRelayCommand ShowModelsCommand { get; }
+
+    public IRelayCommand ShowHelpCommand { get; }
 
     public IRelayCommand OpenSettingsCommand { get; }
 
@@ -5126,12 +5129,14 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         OnPropertyChanged(nameof(IsModelsPageVisible));
         OnPropertyChanged(nameof(IsCodexSessionsPageVisible));
         OnPropertyChanged(nameof(IsSettingsPageVisible));
+        OnPropertyChanged(nameof(IsHelpPageVisible));
         OnPropertyChanged(nameof(IsClaudePageVisible));
         OnPropertyChanged(nameof(IsHomeNavSelected));
         OnPropertyChanged(nameof(IsLogsNavSelected));
         OnPropertyChanged(nameof(IsModelsNavSelected));
         OnPropertyChanged(nameof(IsCodexSessionsNavSelected));
         OnPropertyChanged(nameof(IsSettingsNavSelected));
+        OnPropertyChanged(nameof(IsHelpNavSelected));
         OnPropertyChanged(nameof(IsClaudeNavSelected));
         OnPropertyChanged(nameof(WorkspaceTitle));
 
@@ -5385,6 +5390,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public bool IsSettingsPageVisible => CurrentPage == "Settings";
 
+    public bool IsHelpPageVisible => CurrentPage == "Help";
+
     public bool IsClaudePageVisible => CurrentPage == "Claude";
 
     public bool IsHomeNavSelected => IsHomePageVisible;
@@ -5396,6 +5403,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     public bool IsCodexSessionsNavSelected => IsCodexSessionsPageVisible;
 
     public bool IsSettingsNavSelected => IsSettingsPageVisible;
+
+    public bool IsHelpNavSelected => IsHelpPageVisible;
 
     public bool IsClaudeNavSelected => IsClaudePageVisible;
 
@@ -5544,6 +5553,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         "Models" => T("models.title"),
         "CodexSessions" => T("codexSessions.title"),
         "Settings" => T("settings.title"),
+        "Help" => T("help.title"),
         "Claude" => T("claude.title"),
         _ => T("home.title")
     };

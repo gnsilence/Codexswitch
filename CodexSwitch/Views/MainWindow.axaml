@@ -168,6 +168,15 @@
                                                     <TextBlock Text="{i18n:Tr nav.settings}" TextTrimming="CharacterEllipsis"/>
                                                 </ui:CodexSidebarMenuButton>
                                             </ui:CodexSidebarMenuItem>
+                                            <ui:CodexSidebarMenuItem>
+                                                <ui:CodexSidebarMenuButton Command="{Binding ShowHelpCommand}"
+                                                                          IsActive="{Binding IsHelpNavSelected}">
+                                                    <ui:CodexSidebarMenuButton.Icon>
+                                                        <lucide:LucideIcon Kind="BookOpenCheck" Size="17" StrokeWidth="2"/>
+                                                    </ui:CodexSidebarMenuButton.Icon>
+                                                    <TextBlock Text="{i18n:Tr nav.help}" TextTrimming="CharacterEllipsis"/>
+                                                </ui:CodexSidebarMenuButton>
+                                            </ui:CodexSidebarMenuItem>
                                         </ui:CodexSidebarMenu>
                                     </ui:CodexSidebarGroupContent>
                                 </StackPanel>
@@ -227,6 +236,7 @@
                     <pages:UsagePage IsVisible="{Binding IsUsagePageVisible}"/>
                     <pages:ModelsPage IsVisible="{Binding IsModelsPageVisible}"/>
                     <pages:SettingsPage IsVisible="{Binding IsSettingsPageVisible}"/>
+                    <pages:HelpPage IsVisible="{Binding IsHelpPageVisible}"/>
                     <pages:ClaudePage IsVisible="{Binding IsClaudePageVisible}"/>
                 </Grid>
             </Grid>

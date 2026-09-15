@@ -1,0 +1,447 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CodexSwitch.ViewModels"
+             xmlns:ui="using:CodexSwitchUI.Controls"
+             xmlns:text="using:CodexSwitchUI.Primitives"
+             xmlns:i18n="using:CodexSwitch.I18n"
+             xmlns:lucide="using:Lucide.Avalonia"
+             x:Class="CodexSwitch.Views.Pages.HelpPage"
+             x:DataType="vm:MainWindowViewModel">
+    <UserControl.Styles>
+        <Style Selector="Border.help-card">
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CodexSwitch.BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource CodexSwitch.RadiusLg}"/>
+        </Style>
+        <Style Selector="Border.help-route">
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.ProviderCardActiveBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CodexSwitch.ProviderCardActiveBorderBrush}"/>
+        </Style>
+        <Style Selector="Border.help-step-number">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="CornerRadius" Value="15"/>
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+        </Style>
+        <Style Selector="Border.help-icon">
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}"/>
+        </Style>
+        <Style Selector="Border.help-note">
+            <Setter Property="Padding" Value="18"/>
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CodexSwitch.WarningBrush}"/>
+            <Setter Property="BorderThickness" Value="3,0,0,0"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource CodexSwitch.RadiusMd}"/>
+        </Style>
+        <Style Selector="Border.help-sync-callout">
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.ProviderCardActiveBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CodexSwitch.ProviderCardActiveBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource CodexSwitch.RadiusMd}"/>
+        </Style>
+        <Style Selector="Border.help-sync-column">
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.MutedBrush}"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource CodexSwitch.RadiusMd}"/>
+        </Style>
+        <Style Selector="Border.help-flow-step">
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Background" Value="{DynamicResource CodexSwitch.CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CodexSwitch.BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource CodexSwitch.RadiusMd}"/>
+        </Style>
+        <Style Selector="TextBlock.help-section-title">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.ForegroundBrush}"/>
+        </Style>
+        <Style Selector="TextBlock.help-item-title">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.ForegroundBrush}"/>
+        </Style>
+        <Style Selector="TextBlock.help-body">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="LineHeight" Value="18"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.MutedForegroundBrush}"/>
+        </Style>
+        <Style Selector="TextBlock.help-step">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{DynamicResource CodexSwitch.PrimaryForegroundBrush}"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </UserControl.Styles>
+
+    <ScrollViewer>
+        <Grid Margin="32,18,32,36"
+              MaxWidth="1080"
+              HorizontalAlignment="Stretch"
+              RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+              RowSpacing="18">
+            <ui:CodexSection Classes="page-header"
+                             Title="{i18n:Tr help.title}"
+                             Description="{i18n:Tr help.description}">
+                <ui:CodexSection.Actions>
+                    <Border Padding="10,5"
+                            Background="{DynamicResource CodexSwitch.MutedBrush}"
+                            CornerRadius="999">
+                        <TextBlock Text="{i18n:Tr help.badge}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                    </Border>
+                </ui:CodexSection.Actions>
+            </ui:CodexSection>
+
+            <Border Grid.Row="1"
+                    Classes="help-card help-route">
+                <Grid ColumnDefinitions="0.34*,0.66*"
+                      ColumnSpacing="28">
+                    <StackPanel Spacing="8"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="{i18n:Tr help.quickStart.eyebrow}"
+                                   FontSize="11"
+                                   FontWeight="Bold"
+                                   Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                        <TextBlock Text="{i18n:Tr help.quickStart.title}"
+                                   FontSize="22"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="{i18n:Tr help.quickStart.description}"
+                                   Classes="help-body"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Spacing="14">
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="12">
+                            <Border Classes="help-step-number">
+                                <TextBlock Text="1" Classes="help-step"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.quickStart.step1.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.quickStart.step1.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="12">
+                            <Border Classes="help-step-number">
+                                <TextBlock Text="2" Classes="help-step"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.quickStart.step2.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.quickStart.step2.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="12">
+                            <Border Classes="help-step-number">
+                                <TextBlock Text="3" Classes="help-step"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.quickStart.step3.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.quickStart.step3.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="12">
+                            <Border Classes="help-step-number">
+                                <TextBlock Text="4" Classes="help-step"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.quickStart.step4.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.quickStart.step4.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2"
+                  RowDefinitions="Auto"
+                  RowSpacing="18">
+                <Border Classes="help-card">
+                    <StackPanel Spacing="18">
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="RefreshCw"
+                                                   Size="18"
+                                                   StrokeWidth="2"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="3">
+                                <TextBlock Text="{i18n:Tr help.providerGuide.title}" Classes="help-section-title"/>
+                                <TextBlock Text="{i18n:Tr help.providerGuide.description}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Classes="help-sync-callout">
+                            <Grid ColumnDefinitions="Auto,*"
+                                  ColumnSpacing="12">
+                                <lucide:LucideIcon Kind="Info"
+                                                   Size="19"
+                                                   StrokeWidth="2"
+                                                   Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                                <StackPanel Grid.Column="1" Spacing="3">
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.rule.title}" Classes="help-item-title"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.rule.body}" Classes="help-body"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Grid ColumnDefinitions="*,*,*"
+                              ColumnSpacing="14">
+                            <Border Classes="help-sync-column">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.sync.title}" Classes="help-item-title"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.sync.item1}" Classes="help-body"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.sync.item2}" Classes="help-body"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.sync.item3}" Classes="help-body"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.sync.item4}" Classes="help-body"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1"
+                                    Classes="help-sync-column">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.save.title}" Classes="help-item-title"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.save.item1}" Classes="help-body"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.save.item2}" Classes="help-body"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.save.item3}" Classes="help-body"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Classes="help-sync-column">
+                                <StackPanel Spacing="9">
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.types.title}" Classes="help-item-title"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.types.item1}" Classes="help-body"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.types.item2}" Classes="help-body"/>
+                                    <TextBlock Text="{i18n:Tr help.providerGuide.types.item3}" Classes="help-body"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="{i18n:Tr help.providerGuide.flow.title}" Classes="help-item-title"/>
+                            <UniformGrid Columns="5">
+                                <Border Classes="help-flow-step" Margin="0,0,8,0">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="1" FontWeight="Bold" Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                                        <TextBlock Text="{i18n:Tr help.providerGuide.flow.step1}" Classes="help-body"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="help-flow-step" Margin="0,0,8,0">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="2" FontWeight="Bold" Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                                        <TextBlock Text="{i18n:Tr help.providerGuide.flow.step2}" Classes="help-body"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="help-flow-step" Margin="0,0,8,0">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="3" FontWeight="Bold" Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                                        <TextBlock Text="{i18n:Tr help.providerGuide.flow.step3}" Classes="help-body"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="help-flow-step" Margin="0,0,8,0">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="4" FontWeight="Bold" Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                                        <TextBlock Text="{i18n:Tr help.providerGuide.flow.step4}" Classes="help-body"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Classes="help-flow-step">
+                                    <StackPanel Spacing="5">
+                                        <TextBlock Text="5" FontWeight="Bold" Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"/>
+                                        <TextBlock Text="{i18n:Tr help.providerGuide.flow.step5}" Classes="help-body"/>
+                                    </StackPanel>
+                                </Border>
+                            </UniformGrid>
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="Auto,*"
+                              ColumnSpacing="10">
+                            <lucide:LucideIcon Kind="BookOpenCheck"
+                                               Size="17"
+                                               StrokeWidth="2"
+                                               Foreground="{DynamicResource CodexSwitch.SuccessBrush}"/>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.providerGuide.verify.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.providerGuide.verify.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="3"
+                  ColumnDefinitions="*,*"
+                  ColumnSpacing="18">
+                <Border Classes="help-card">
+                    <StackPanel Spacing="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{i18n:Tr help.features.title}" Classes="help-section-title"/>
+                            <TextBlock Text="{i18n:Tr help.features.description}" Classes="help-body"/>
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="ServerCog" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.features.providers.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.features.providers.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="BrainCircuit" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.features.models.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.features.models.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="ListTree" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.features.usage.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.features.usage.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="History" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.features.sessions.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.features.sessions.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="Settings" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.features.settings.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.features.settings.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1"
+                        Classes="help-card">
+                    <StackPanel Spacing="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{i18n:Tr help.advanced.title}" Classes="help-section-title"/>
+                            <TextBlock Text="{i18n:Tr help.advanced.description}" Classes="help-body"/>
+                        </StackPanel>
+
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="Route" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.advanced.routing.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.advanced.routing.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="Settings" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.advanced.network.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.advanced.network.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="KeyRound" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.advanced.auth.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.advanced.auth.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Border Classes="help-icon">
+                                <lucide:LucideIcon Kind="BadgeDollarSign" Size="18" StrokeWidth="2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{i18n:Tr help.advanced.pricing.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.advanced.pricing.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="4"
+                  RowDefinitions="Auto,Auto"
+                  RowSpacing="18">
+                <Border Classes="help-note">
+                    <Grid ColumnDefinitions="Auto,*"
+                          ColumnSpacing="12">
+                        <lucide:LucideIcon Kind="Info"
+                                           Size="19"
+                                           StrokeWidth="2"
+                                           Foreground="{DynamicResource CodexSwitch.WarningBrush}"/>
+                        <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="{i18n:Tr help.notes.title}" Classes="help-item-title"/>
+                            <TextBlock Text="{i18n:Tr help.notes.body}" Classes="help-body"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1"
+                        Classes="help-card">
+                    <StackPanel Spacing="14">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="{i18n:Tr help.troubleshooting.title}" Classes="help-section-title"/>
+                            <TextBlock Text="{i18n:Tr help.troubleshooting.description}" Classes="help-body"/>
+                        </StackPanel>
+                        <Grid ColumnDefinitions="*,*,*"
+                              ColumnSpacing="18">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{i18n:Tr help.troubleshooting.proxy.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.troubleshooting.proxy.body}" Classes="help-body"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock Text="{i18n:Tr help.troubleshooting.request.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.troubleshooting.request.body}" Classes="help-body"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Spacing="4">
+                                <TextBlock Text="{i18n:Tr help.troubleshooting.config.title}" Classes="help-item-title"/>
+                                <TextBlock Text="{i18n:Tr help.troubleshooting.config.body}" Classes="help-body"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </ScrollViewer>
+</UserControl>
