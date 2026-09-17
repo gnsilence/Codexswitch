@@ -213,6 +213,148 @@ public sealed class AppViewMigrationTests
     }
 
     [Fact]
+    public void ProviderSyncStopsCodexAndMigratesSessionsBeforeWritingManagedConfig()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepoDirectory("CodexSwitch", "ViewModels"),
+            "MainWindowViewModel.cs"));
+        var methodStart = source.IndexOf("private async Task SyncProviderToCodexAsync", StringComparison.Ordinal);
+        var methodEnd = source.IndexOf("private async Task RefreshProviderModelsAsync", methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        var stopIndex = method.IndexOf("_codexDesktopClientLauncher.TryStop", StringComparison.Ordinal);
+        var migrateIndex = method.IndexOf("_codexSessionMigrationService.MigrateToManagedProvider", StringComparison.Ordinal);
+        var successCheckIndex = method.IndexOf("if (!migrationResult.Succeeded)", StringComparison.Ordinal);
+        var applyIndex = method.IndexOf("_codexConfigWriter.Apply", StringComparison.Ordinal);
+        var launchIndex = method.LastIndexOf("_codexDesktopClientLauncher.TryLaunch", StringComparison.Ordinal);
+
+        Assert.True(stopIndex >= 0);
+        Assert.True(migrateIndex > stopIndex);
+        Assert.True(successCheckIndex > migrateIndex);
+        Assert.True(applyIndex > successCheckIndex);
+        Assert.True(launchIndex > applyIndex);
+    }
+
+    [Fact]
+    public void CodexSessionMigrationIsEnabledForIndexOnlyProviders()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepoDirectory("CodexSwitch", "ViewModels"),
+            "MainWindowViewModel.cs"));
+
+        Assert.Contains(
+            "CodexSessionMigratableCount > 0 || CodexSessionMigratableIndexCount > 0",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CodexSessionMigratableIndexCount = inspection.Providers",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "partial void OnCodexSessionMigratableIndexCountChanged",
+            source,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CodexSessionMigrationUsesProviderSyncAndRestoreRestartsCodex()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepoDirectory("CodexSwitch", "ViewModels"),
+            "MainWindowViewModel.cs"));
+
+        var migrationStart = source.IndexOf(
+            "private async Task MigrateCodexSessionsAsync",
+            StringComparison.Ordinal);
+        var migrationEnd = source.IndexOf(
+            "private async Task RestoreCodexSessionsAsync",
+            migrationStart,
+            StringComparison.Ordinal);
+        Assert.True(migrationStart >= 0 && migrationEnd > migrationStart);
+        var migrationMethod = source[migrationStart..migrationEnd];
+        Assert.Contains("SyncProviderToCodexAsync(providerRow)", migrationMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "_codexSessionMigrationService.MigrateToManagedProvider",
+            migrationMethod,
+            StringComparison.Ordinal);
+
+        AssertCodexRestartWrapsSessionAction(
+            source,
+            "private async Task RestoreCodexSessionsAsync",
+            "private void ApplyCodexSessionInspection",
+            "_codexSessionMigrationService.RestoreOriginalProviders");
+    }
+
+    [Fact]
+    public void CodexSessionsPageExposesHalfMigrationRepairAction()
+    {
+        var source = File.ReadAllText(FindRepoFile(
+            "CodexSwitch",
+            "Views",
+            "Pages",
+            "CodexSessionsPage.axaml"));
+
+        Assert.Contains("Command=\"{Binding RepairCodexSessionsCommand}\"", source);
+        Assert.Contains("IsEnabled=\"{Binding CanRepairCodexSessions}\"", source);
+        Assert.Contains("Text=\"{Binding CodexSessionRepairButtonText}\"", source);
+    }
+
+    [Fact]
+    public void CodexSessionMigrationRequiresExplicitConfirmation()
+    {
+        var mainWindow = File.ReadAllText(Path.Combine(
+            FindRepoDirectory("CodexSwitch", "Views"),
+            "MainWindow.axaml"));
+        var dialog = File.ReadAllText(FindRepoFile(
+            "CodexSwitch",
+            "Views",
+            "Dialogs",
+            "CodexSessionMigrationDialog.axaml"));
+        var viewModel = File.ReadAllText(Path.Combine(
+            FindRepoDirectory("CodexSwitch", "ViewModels"),
+            "MainWindowViewModel.cs"));
+        var zhCn = File.ReadAllText(FindRepoFile(
+            "CodexSwitch",
+            "Assets",
+            "i18n",
+            "zh-CN.json"));
+
+        Assert.Contains("<dialogs:CodexSessionMigrationDialog Grid.ColumnSpan=\"2\"/>", mainWindow);
+        Assert.Contains("IsVisible=\"{Binding IsCodexSessionMigrationDialogOpen}\"", dialog);
+        Assert.Contains("Command=\"{Binding CancelCodexSessionMigrationCommand}\"", dialog);
+        Assert.Contains("Command=\"{Binding ConfirmCodexSessionMigrationCommand}\"", dialog);
+        Assert.Contains(
+            "IsCodexSessionMigrationDialogOpen = true",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "IsCodexSessionMigrationDialogOpen = false",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains("如果迁移失败", zhCn, StringComparison.Ordinal);
+        Assert.Contains("点击“还原”按钮", zhCn, StringComparison.Ordinal);
+    }
+
+    private static void AssertCodexRestartWrapsSessionAction(
+        string source,
+        string methodStartMarker,
+        string methodEndMarker,
+        string actionMarker)
+    {
+        var methodStart = source.IndexOf(methodStartMarker, StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(methodEndMarker, methodStart, StringComparison.Ordinal);
+        Assert.True(methodStart >= 0 && methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        var stopIndex = method.IndexOf("_codexDesktopClientLauncher.TryStop", StringComparison.Ordinal);
+        var actionIndex = method.IndexOf(actionMarker, StringComparison.Ordinal);
+        var launchIndex = method.IndexOf("_codexDesktopClientLauncher.TryLaunch", actionIndex, StringComparison.Ordinal);
+
+        Assert.True(stopIndex >= 0);
+        Assert.True(actionIndex > stopIndex);
+        Assert.True(launchIndex > actionIndex);
+    }
+
+    [Fact]
     public void ModelCatalogRefreshesAfterProviderActivationAndWhenPageOpens()
     {
         var source = File.ReadAllText(Path.Combine(

@@ -45,6 +45,30 @@ public sealed class CodexConfigWriterTests : IDisposable
     }
 
     [Fact]
+    public void ManagedFilesSnapshot_RestoresExactFilesAndRemovesNewFiles()
+    {
+        var paths = new AppPaths(
+            Path.Combine(_tempDirectory, "snapshot-appdata"),
+            Path.Combine(_tempDirectory, "snapshot-codex"));
+        Directory.CreateDirectory(paths.CodexDirectory);
+        var originalConfig = Encoding.UTF8.GetBytes("model_provider = \"custom\"\r\n");
+        var originalAuth = Encoding.UTF8.GetBytes("{\"auth_mode\":\"apikey\"}\n");
+        File.WriteAllBytes(paths.CodexConfigPath, originalConfig);
+        File.WriteAllBytes(paths.CodexAuthPath, originalAuth);
+        var writer = new CodexConfigWriter(paths);
+        var snapshot = writer.CaptureManagedFilesSnapshot();
+
+        File.WriteAllText(paths.CodexConfigPath, "model_provider = \"meteor-ai\"\n");
+        File.Delete(paths.CodexAuthPath);
+        File.WriteAllText(paths.CodexModelCatalogPath, "{}");
+        writer.RestoreManagedFilesSnapshot(snapshot);
+
+        Assert.Equal(originalConfig, File.ReadAllBytes(paths.CodexConfigPath));
+        Assert.Equal(originalAuth, File.ReadAllBytes(paths.CodexAuthPath));
+        Assert.False(File.Exists(paths.CodexModelCatalogPath));
+    }
+
+    [Fact]
     public void Apply_ReplacesCodexConfig_WithManagedMeteorProfile()
     {
         var appRoot = Path.Combine(_tempDirectory, "managed-appdata");

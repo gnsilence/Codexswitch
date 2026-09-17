@@ -10,6 +10,7 @@ using CodexSwitch.Proxy;
 using CodexSwitch.Services;
 using CodexSwitch.ViewModels;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
 
 namespace CodexSwitch.Tests;
 
@@ -2270,7 +2271,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         WriteCodexSession(paths, "sessions/2026/05/17/rollout-openai.jsonl", "openai");
         WriteCodexSession(paths, "sessions/2026/05/18/rollout-managed.jsonl", CodexConfigWriter.ManagedProviderId);
 
-        var service = new CodexSessionMigrationService(paths, sqliteExecutable: "/missing/sqlite3");
+        var service = new CodexSessionMigrationService(paths);
         var inspection = service.Inspect();
 
         Assert.Equal(2, inspection.TotalSessionFileCount);
@@ -2286,12 +2287,9 @@ public sealed class UiV2InfrastructureTests : IDisposable
     public void CodexSessionMigrationService_InspectAggregatesThreadProvidersCaseInsensitively()
     {
         var paths = CreatePaths("codex-sessions-index-case-insensitive");
-        var sqlitePath = Path.Combine(paths.CodexDirectory, "state_5.sqlite");
-        Directory.CreateDirectory(paths.CodexDirectory);
-        File.WriteAllText(sqlitePath, "");
-        var sqliteExecutable = WriteFakeSqlite(paths, "OpenAI\t1\nopenai\t1\n");
+        CreateCodexStateDatabase(paths, ("thread-1", "OpenAI"), ("thread-2", "openai"));
 
-        var service = new CodexSessionMigrationService(paths, sqliteExecutable);
+        var service = new CodexSessionMigrationService(paths);
         var inspection = service.Inspect();
 
         var provider = Assert.Single(inspection.Providers);
@@ -2300,54 +2298,243 @@ public sealed class UiV2InfrastructureTests : IDisposable
     }
 
     [Fact]
-    public void CodexSessionMigrationService_MigratesSessionMetadataToManagedProvider()
+    public void CodexSessionMigrationService_MigratesCustomProviderInFilesAndThreadIndex()
     {
         var paths = CreatePaths("codex-sessions-migrate");
-        var openAiSession = WriteCodexSession(paths, "sessions/2026/05/17/rollout-openai.jsonl", "openai");
+        var customSession = WriteCodexSession(
+            paths,
+            "sessions/2026/05/17/rollout-custom.jsonl",
+            "custom",
+            sessionId: "custom-thread");
         WriteCodexSession(paths, "archived_sessions/rollout-managed.jsonl", CodexConfigWriter.ManagedProviderId);
+        CreateCodexStateDatabase(
+            paths,
+            ("custom-thread", "custom"),
+            ("managed-thread", CodexConfigWriter.ManagedProviderId));
+        var originalBody = File.ReadAllBytes(customSession)[(Array.IndexOf(File.ReadAllBytes(customSession), (byte)'\n') + 1)..];
 
-        var service = new CodexSessionMigrationService(paths, sqliteExecutable: "/missing/sqlite3");
+        var service = new CodexSessionMigrationService(paths);
         var result = service.MigrateToManagedProvider();
         var inspection = service.Inspect();
 
+        Assert.True(result.Succeeded);
         Assert.Equal(1, result.UpdatedSessionFiles);
+        Assert.Equal(1, result.UpdatedThreadIndexEntries);
         Assert.Empty(result.FailedFiles);
         Assert.Equal(0, inspection.MigratableSessionFileCount);
+        Assert.Equal(
+            new[] { CodexConfigWriter.ManagedProviderId, CodexConfigWriter.ManagedProviderId },
+            ReadThreadProviders(paths));
 
-        using var document = JsonDocument.Parse(File.ReadLines(openAiSession).First());
+        var migratedBytes = File.ReadAllBytes(customSession);
+        var migratedBody = migratedBytes[(Array.IndexOf(migratedBytes, (byte)'\n') + 1)..];
+        Assert.Equal(originalBody, migratedBody);
+        using var document = JsonDocument.Parse(File.ReadLines(customSession).First());
         Assert.Equal(
             CodexConfigWriter.ManagedProviderId,
             document.RootElement.GetProperty("payload").GetProperty("model_provider").GetString());
         Assert.Equal(
-            "openai",
+            "custom",
             document.RootElement.GetProperty("payload").GetProperty("codexswitch_original_model_provider").GetString());
     }
 
     [Fact]
-    public void CodexSessionMigrationService_RestoresMigratedSessionMetadataToOriginalProvider()
+    public void CodexSessionMigrationService_DoesNotChangeFilesWhenStateDatabaseCannotBeUpdated()
+    {
+        var paths = CreatePaths("codex-sessions-invalid-index");
+        var customSession = WriteCodexSession(paths, "sessions/2026/05/17/rollout-custom.jsonl", "custom");
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(Path.Combine(paths.CodexDirectory, "state_5.sqlite"), "not a sqlite database");
+        var before = File.ReadAllBytes(customSession);
+
+        var result = new CodexSessionMigrationService(paths).MigrateToManagedProvider();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("state-db-failed", result.StateIndexStatus);
+        Assert.Equal(before, File.ReadAllBytes(customSession));
+    }
+
+    [Fact]
+    public void CodexSessionMigrationService_RepairsLegacyHalfMigrationAndKeepsItRestorable()
+    {
+        var paths = CreatePaths("codex-sessions-half-migrated");
+        var session = WriteCodexSession(
+            paths,
+            "sessions/2026/05/17/rollout-custom.jsonl",
+            CodexConfigWriter.ManagedProviderId,
+            sessionId: "custom-thread");
+        CreateCodexStateDatabase(paths, ("custom-thread", "custom"));
+        var service = new CodexSessionMigrationService(paths);
+
+        var before = service.Inspect();
+        var migration = service.MigrateToManagedProvider();
+        var after = service.Inspect();
+
+        Assert.Equal(1, before.RepairableSessionCount);
+        Assert.True(migration.Succeeded);
+        Assert.Equal(1, migration.UpdatedSessionFiles);
+        Assert.Equal(0, after.RepairableSessionCount);
+        Assert.Equal(new[] { CodexConfigWriter.ManagedProviderId }, ReadThreadProviders(paths));
+        using (var document = JsonDocument.Parse(File.ReadLines(session).First()))
+        {
+            var payload = document.RootElement.GetProperty("payload");
+            Assert.Equal(CodexConfigWriter.ManagedProviderId, payload.GetProperty("model_provider").GetString());
+            Assert.Equal("custom", payload.GetProperty("codexswitch_original_model_provider").GetString());
+        }
+
+        var restore = service.RestoreOriginalProviders();
+
+        Assert.True(restore.Succeeded);
+        Assert.Equal(new[] { "custom" }, ReadThreadProviders(paths));
+        using var restoredDocument = JsonDocument.Parse(File.ReadLines(session).First());
+        var restoredPayload = restoredDocument.RootElement.GetProperty("payload");
+        Assert.Equal("custom", restoredPayload.GetProperty("model_provider").GetString());
+        Assert.False(restoredPayload.TryGetProperty("codexswitch_original_model_provider", out _));
+    }
+
+    [Fact]
+    public void CodexSessionMigrationService_RepairsIndexFirstHalfMigration()
+    {
+        var paths = CreatePaths("codex-sessions-index-first-half-migrated");
+        var session = WriteCodexSession(
+            paths,
+            "sessions/2026/05/17/rollout-custom.jsonl",
+            "custom",
+            sessionId: "custom-thread");
+        CreateCodexStateDatabase(paths, ("custom-thread", CodexConfigWriter.ManagedProviderId));
+        var service = new CodexSessionMigrationService(paths);
+
+        var before = service.Inspect();
+        var migration = service.MigrateToManagedProvider();
+        var after = service.Inspect();
+
+        Assert.Equal(1, before.RepairableSessionCount);
+        Assert.True(migration.Succeeded);
+        Assert.Equal(1, migration.UpdatedSessionFiles);
+        Assert.Equal(0, after.RepairableSessionCount);
+        using var document = JsonDocument.Parse(File.ReadLines(session).First());
+        var payload = document.RootElement.GetProperty("payload");
+        Assert.Equal(CodexConfigWriter.ManagedProviderId, payload.GetProperty("model_provider").GetString());
+        Assert.Equal("custom", payload.GetProperty("codexswitch_original_model_provider").GetString());
+    }
+
+    [Fact]
+    public void CodexSessionMigrationService_MigratesOrphanedThreadIndexWithoutInventingSessionFile()
+    {
+        var paths = CreatePaths("codex-sessions-missing-file");
+        CreateCodexStateDatabase(paths, ("missing-thread", "custom"));
+        var service = new CodexSessionMigrationService(paths);
+
+        var before = service.Inspect();
+        var result = service.MigrateToManagedProvider();
+        var after = service.Inspect();
+
+        Assert.Equal(1, before.RepairableSessionCount);
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, result.UpdatedThreadIndexEntries);
+        Assert.Equal(0, after.RepairableSessionCount);
+        Assert.Equal(new[] { CodexConfigWriter.ManagedProviderId }, ReadThreadProviders(paths));
+        Assert.Empty(Directory.EnumerateFiles(paths.CodexDirectory, "rollout-*.jsonl", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void CodexSessionMigrationService_DoesNotChangeFilesWhenStateDatabaseIsLocked()
+    {
+        var paths = CreatePaths("codex-sessions-locked-index");
+        var session = WriteCodexSession(
+            paths,
+            "sessions/2026/05/17/rollout-custom.jsonl",
+            "custom",
+            sessionId: "custom-thread");
+        CreateCodexStateDatabase(paths, ("custom-thread", "custom"));
+        var before = File.ReadAllBytes(session);
+        using var lockConnection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(paths.CodexDirectory, "state_5.sqlite"),
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
+            }.ToString());
+        lockConnection.Open();
+        using var lockCommand = lockConnection.CreateCommand();
+        lockCommand.CommandText = "begin exclusive;";
+        lockCommand.ExecuteNonQuery();
+
+        var result = new CodexSessionMigrationService(paths).MigrateToManagedProvider();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("state-db-locked", result.StateIndexStatus);
+        Assert.Equal(before, File.ReadAllBytes(session));
+        lockCommand.CommandText = "rollback;";
+        lockCommand.ExecuteNonQuery();
+        Assert.Equal(new[] { "custom" }, ReadThreadProviders(paths));
+    }
+
+    [Fact]
+    public void CodexSessionMigrationService_RollsBackDatabaseAndFilesWhenAFileReplacementFails()
+    {
+        var paths = CreatePaths("codex-sessions-file-rollback");
+        var first = WriteCodexSession(
+            paths,
+            "sessions/2026/05/17/rollout-first.jsonl",
+            "custom",
+            sessionId: "thread-1");
+        var second = WriteCodexSession(
+            paths,
+            "sessions/2026/05/18/rollout-second.jsonl",
+            "custom",
+            sessionId: "thread-2");
+        CreateCodexStateDatabase(paths, ("thread-1", "custom"), ("thread-2", "custom"));
+        var firstBefore = File.ReadAllBytes(first);
+        var secondBefore = File.ReadAllBytes(second);
+        var replacementCount = 0;
+        var service = new CodexSessionMigrationService(paths, (source, destination) =>
+        {
+            replacementCount++;
+            if (replacementCount == 2)
+                throw new IOException("simulated replacement failure");
+            File.Move(source, destination, overwrite: true);
+        });
+
+        var result = service.MigrateToManagedProvider();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("session-file-failed", result.StateIndexStatus);
+        Assert.Equal(firstBefore, File.ReadAllBytes(first));
+        Assert.Equal(secondBefore, File.ReadAllBytes(second));
+        Assert.Equal(new[] { "custom", "custom" }, ReadThreadProviders(paths));
+    }
+
+    [Fact]
+    public void CodexSessionMigrationService_RestoresMigratedSessionAndThreadIndexToCustom()
     {
         var paths = CreatePaths("codex-sessions-restore");
         var migratedSession = WriteCodexSession(
             paths,
-            "sessions/2026/05/17/rollout-migrated.jsonl",
-            CodexConfigWriter.ManagedProviderId,
-            originalModelProvider: "openai");
+            "sessions/2026/05/17/rollout-custom.jsonl",
+            "custom",
+            sessionId: "custom-thread");
+        CreateCodexStateDatabase(paths, ("custom-thread", "custom"));
+        var service = new CodexSessionMigrationService(paths);
+        var migration = service.MigrateToManagedProvider();
 
-        var service = new CodexSessionMigrationService(paths, sqliteExecutable: "/missing/sqlite3");
         var before = service.Inspect();
-
         var result = service.RestoreOriginalProviders();
         var after = service.Inspect();
 
+        Assert.True(migration.Succeeded);
         Assert.Equal(1, before.RestorableSessionFileCount);
+        Assert.True(result.Succeeded);
         Assert.Equal(1, result.RestoredSessionFiles);
+        Assert.Equal(1, result.RestoredThreadIndexEntries);
         Assert.Empty(result.FailedFiles);
         Assert.Equal(0, after.RestorableSessionFileCount);
         Assert.Equal(1, after.MigratableSessionFileCount);
+        Assert.Equal(new[] { "custom" }, ReadThreadProviders(paths));
 
         using var document = JsonDocument.Parse(File.ReadLines(migratedSession).First());
         var payload = document.RootElement.GetProperty("payload");
-        Assert.Equal("openai", payload.GetProperty("model_provider").GetString());
+        Assert.Equal("custom", payload.GetProperty("model_provider").GetString());
         Assert.False(payload.TryGetProperty("codexswitch_original_model_provider", out _));
     }
 
@@ -2681,7 +2868,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
         AppPaths paths,
         string relativePath,
         string modelProvider,
-        string? originalModelProvider = null)
+        string? originalModelProvider = null,
+        string? sessionId = null)
     {
         var path = Path.Combine(paths.CodexDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -2691,7 +2879,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         File.WriteAllText(
             path,
             "{\"timestamp\":\"2026-05-21T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"" +
-            Guid.NewGuid().ToString("N") +
+            (sessionId ?? Guid.NewGuid().ToString("N")) +
             "\",\"model_provider\":\"" +
             modelProvider +
             "\"" +
@@ -2700,24 +2888,53 @@ public sealed class UiV2InfrastructureTests : IDisposable
         return path;
     }
 
-    private static string WriteFakeSqlite(AppPaths paths, string output)
+    private static void CreateCodexStateDatabase(
+        AppPaths paths,
+        params (string Id, string ModelProvider)[] threads)
     {
-        var path = Path.Combine(paths.RootDirectory, OperatingSystem.IsWindows() ? "sqlite3.cmd" : "sqlite3");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-
-        if (OperatingSystem.IsWindows())
+        Directory.CreateDirectory(paths.CodexDirectory);
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(paths.CodexDirectory, "state_5.sqlite"),
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Pooling = false
+            }.ToString());
+        connection.Open();
+        using (var create = connection.CreateCommand())
         {
-            var builder = new StringBuilder("@echo off\r\n");
-            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-                builder.Append("echo ").Append(line).Append("\r\n");
-
-            File.WriteAllText(path, builder.ToString());
-            return path;
+            create.CommandText =
+                "create table threads (id text primary key, model_provider text not null);";
+            create.ExecuteNonQuery();
         }
 
-        File.WriteAllText(path, "#!/bin/sh\nprintf '" + output.Replace("\\", "\\\\").Replace("'", "'\\''") + "'\n");
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        return path;
+        foreach (var thread in threads)
+        {
+            using var insert = connection.CreateCommand();
+            insert.CommandText = "insert into threads(id, model_provider) values ($id, $provider);";
+            insert.Parameters.AddWithValue("$id", thread.Id);
+            insert.Parameters.AddWithValue("$provider", thread.ModelProvider);
+            insert.ExecuteNonQuery();
+        }
+    }
+
+    private static string[] ReadThreadProviders(AppPaths paths)
+    {
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = Path.Combine(paths.CodexDirectory, "state_5.sqlite"),
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
+            }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "select model_provider from threads order by id;";
+        using var reader = command.ExecuteReader();
+        var providers = new List<string>();
+        while (reader.Read())
+            providers.Add(reader.GetString(0));
+        return providers.ToArray();
     }
 
     private static int GetAvailablePort()

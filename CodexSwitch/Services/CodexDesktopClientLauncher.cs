@@ -34,6 +34,11 @@ public sealed class CodexDesktopClientLauncher
 
     public bool TryRestart()
     {
+        return TryStop() && TryLaunch();
+    }
+
+    public bool TryStop()
+    {
         var desktopProcesses = FindDesktopProcesses();
         try
         {
@@ -84,7 +89,7 @@ public sealed class CodexDesktopClientLauncher
                 process.Dispose();
         }
 
-        return TryLaunch();
+        return true;
     }
 
     private static bool HasExited(Process process)

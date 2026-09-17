@@ -246,6 +246,7 @@
             <dialogs:ModelEditorDialog Grid.ColumnSpan="2"/>
             <dialogs:DeleteModelDialog Grid.ColumnSpan="2"/>
             <dialogs:DeleteProviderDialog Grid.ColumnSpan="2"/>
+            <dialogs:CodexSessionMigrationDialog Grid.ColumnSpan="2"/>
         </Grid>
     </Border>
 </Window>

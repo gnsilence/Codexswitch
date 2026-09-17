@@ -1,0 +1,73 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:CodexSwitch.ViewModels"
+             xmlns:ui="using:CodexSwitch.Controls"
+             xmlns:cui="using:CodexSwitchUI.Controls"
+             xmlns:i18n="using:CodexSwitch.I18n"
+             xmlns:lucide="using:Lucide.Avalonia"
+             x:Class="CodexSwitch.Views.Dialogs.CodexSessionMigrationDialog"
+             x:DataType="vm:MainWindowViewModel">
+    <ui:CsDialog IsVisible="{Binding IsCodexSessionMigrationDialogOpen}">
+        <Border Classes="dialog-card"
+                Width="460"
+                MaxWidth="500"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <StackPanel Spacing="16">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Width="36"
+                            Height="36"
+                            CornerRadius="10"
+                            Background="{DynamicResource CodexSwitch.MutedBrush}"
+                            BorderBrush="{DynamicResource CodexSwitch.BorderBrush}"
+                            BorderThickness="1">
+                        <lucide:LucideIcon Kind="MoveRight"
+                                           Size="18"
+                                           StrokeWidth="2"
+                                           Foreground="{DynamicResource CodexSwitch.PrimaryBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Spacing="4">
+                        <ui:CsText Text="{i18n:Tr codexSessions.confirm.title}" Classes="title"/>
+                        <ui:CsText Text="{Binding CodexSessionCurrentProvider}" Classes="muted"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <ui:CsText Text="{i18n:Tr codexSessions.confirm.description}"
+                           TextWrapping="Wrap"
+                           Classes="muted"/>
+
+                <Border Padding="12"
+                        CornerRadius="8"
+                        Background="{DynamicResource CodexSwitch.MutedBrush}"
+                        BorderBrush="{DynamicResource CodexSwitch.BorderBrush}"
+                        BorderThickness="1">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                        <lucide:LucideIcon Kind="Info"
+                                           Size="17"
+                                           StrokeWidth="2"
+                                           Foreground="{DynamicResource CodexSwitch.WarningBrush}"/>
+                        <ui:CsText Grid.Column="1"
+                                   Text="{i18n:Tr codexSessions.confirm.restoreHint}"
+                                   TextWrapping="Wrap"
+                                   Classes="muted"/>
+                    </Grid>
+                </Border>
+
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            Spacing="10">
+                    <cui:CodexButton Variant="Outline"
+                                     Size="Small"
+                                     Command="{Binding CancelCodexSessionMigrationCommand}"
+                                     Content="{i18n:Tr common.cancel}"/>
+                    <cui:CodexButton Size="Small"
+                                     IsEnabled="{Binding CanMigrateCodexSessions}"
+                                     Command="{Binding ConfirmCodexSessionMigrationCommand}"
+                                     Content="{i18n:Tr codexSessions.confirm.action}"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </ui:CsDialog>
+</UserControl>

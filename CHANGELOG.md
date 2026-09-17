@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.0.6] - 2026-09-17
+
+### Added
+
+- Added a repair action that detects and completes half-migrated Codex sessions, including mismatched session files, thread indexes, restore metadata, and index-only records.
+- Added a localized migration confirmation dialog that explains the Codex restart and points users to the restore action if migration fails or produces an unexpected result.
+
+### Changed
+
+- Reworked provider synchronization to stop Codex before changing session state, migrate session files and the local thread index together, reload managed configuration, and reopen Codex automatically.
+- Embedded `Microsoft.Data.Sqlite` so session migration no longer depends on an external `sqlite3` executable.
+- Made session restore stop and reopen Codex so resumed conversations do not retain stale provider URLs or API keys.
+
+### Fixed
+
+- Preserved resumable conversations when moving sessions from providers such as `custom` to the CodexSwitch-managed `meteor-ai` provider.
+- Added transactional compensation and managed-file snapshots so failed provider synchronization restores session metadata, thread indexes, configuration, authentication, and model catalog files.
+- Enabled migration and repair when only local thread-index records require updates.
+
 ## [v0.0.5] - 2026-09-15
 
 ### Added

@@ -315,6 +315,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private bool _isCodexSessionMigrating;
 
     [ObservableProperty]
+    private bool _isCodexSessionRepairing;
+
+    [ObservableProperty]
     private bool _isCodexSessionRestoring;
 
     [ObservableProperty]
@@ -325,6 +328,12 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     [ObservableProperty]
     private int _codexSessionMigratableCount;
+
+    [ObservableProperty]
+    private int _codexSessionMigratableIndexCount;
+
+    [ObservableProperty]
+    private int _codexSessionRepairableCount;
 
     [ObservableProperty]
     private int _codexSessionRestorableCount;
@@ -463,6 +472,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     [ObservableProperty]
     private bool _isDeleteProviderDialogOpen;
+
+    [ObservableProperty]
+    private bool _isCodexSessionMigrationDialogOpen;
 
     [ObservableProperty]
     private string _providerPendingDeleteName = "";
@@ -677,6 +689,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         RefreshUsageCommand = new AsyncRelayCommand(RefreshUsageDashboardAsync);
         RefreshCodexSessionsCommand = new AsyncRelayCommand(RefreshCodexSessionsAsync);
         MigrateCodexSessionsCommand = new AsyncRelayCommand(MigrateCodexSessionsAsync);
+        CancelCodexSessionMigrationCommand = new RelayCommand(() => IsCodexSessionMigrationDialogOpen = false);
+        ConfirmCodexSessionMigrationCommand = new AsyncRelayCommand(ConfirmCodexSessionMigrationAsync);
+        RepairCodexSessionsCommand = new AsyncRelayCommand(RepairCodexSessionsAsync);
         RestoreCodexSessionsCommand = new AsyncRelayCommand(RestoreCodexSessionsAsync);
         CheckForUpdatesCommand = new AsyncRelayCommand(() => CheckForUpdatesAsync(false));
         OpenLatestReleaseCommand = new RelayCommand(OpenLatestRelease);
@@ -903,6 +918,12 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public IAsyncRelayCommand MigrateCodexSessionsCommand { get; }
 
+    public IRelayCommand CancelCodexSessionMigrationCommand { get; }
+
+    public IAsyncRelayCommand ConfirmCodexSessionMigrationCommand { get; }
+
+    public IAsyncRelayCommand RepairCodexSessionsCommand { get; }
+
     public IAsyncRelayCommand RestoreCodexSessionsCommand { get; }
 
     public IAsyncRelayCommand CheckForUpdatesCommand { get; }
@@ -1091,28 +1112,70 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     private async Task MigrateCodexSessionsAsync()
     {
-        if (IsCodexSessionMigrating || !CanMigrateCodexSessions)
+        if (!CanMigrateCodexSessions)
             return;
 
-        IsCodexSessionMigrating = true;
+        IsCodexSessionMigrationDialogOpen = true;
+        await Task.CompletedTask;
+    }
+
+    private async Task ConfirmCodexSessionMigrationAsync()
+    {
+        IsCodexSessionMigrationDialogOpen = false;
+        await RunCodexSessionMigrationAsync(repairing: false);
+    }
+
+    private async Task RepairCodexSessionsAsync()
+    {
+        await RunCodexSessionMigrationAsync(repairing: true);
+    }
+
+    private async Task RunCodexSessionMigrationAsync(bool repairing)
+    {
+        if (IsCodexSessionMigrating ||
+            IsCodexSessionRepairing ||
+            _isSyncingProviderToCodex ||
+            (repairing ? !CanRepairCodexSessions : !CanMigrateCodexSessions))
+        {
+            return;
+        }
+
+        if (repairing)
+            IsCodexSessionRepairing = true;
+        else
+            IsCodexSessionMigrating = true;
         try
         {
-            var result = await Task.Run(_codexSessionMigrationService.MigrateToManagedProvider);
+            var provider = ResolveActiveCodexProvider();
+            var providerRow = provider is null
+                ? null
+                : FindProviderRow(ClientAppKind.Codex, provider.Id);
+            if (providerRow is null)
+            {
+                CodexSessionStatusMessage = T("codexSessions.status.noActiveProvider");
+                StatusMessage = CodexSessionStatusMessage;
+                return;
+            }
+
+            await SyncProviderToCodexAsync(providerRow);
             var inspection = await Task.Run(_codexSessionMigrationService.Inspect);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 ApplyCodexSessionInspection(inspection);
-                CodexSessionStatusMessage = BuildCodexSessionMigrationStatusMessage(result);
-                StatusMessage = CodexSessionStatusMessage;
+                CodexSessionStatusMessage = StatusMessage;
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             CodexSessionStatusMessage = F("codexSessions.status.failed", ex.Message);
+            StatusMessage = CodexSessionStatusMessage;
         }
         finally
         {
-            IsCodexSessionMigrating = false;
+            if (repairing)
+                IsCodexSessionRepairing = false;
+            else
+                IsCodexSessionMigrating = false;
         }
     }
 
@@ -1122,23 +1185,45 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             return;
 
         IsCodexSessionRestoring = true;
+        var clientStopped = false;
         try
         {
+            clientStopped = await Task.Run(_codexDesktopClientLauncher.TryStop);
+            if (!clientStopped)
+            {
+                CodexSessionStatusMessage = T("codexSessions.status.clientStopFailed");
+                StatusMessage = CodexSessionStatusMessage;
+                return;
+            }
+
             var result = await Task.Run(_codexSessionMigrationService.RestoreOriginalProviders);
             var inspection = await Task.Run(_codexSessionMigrationService.Inspect);
+            var clientOpened = await Task.Run(_codexDesktopClientLauncher.TryLaunch);
+            clientStopped = false;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 ApplyCodexSessionInspection(inspection);
-                CodexSessionStatusMessage = BuildCodexSessionRestoreStatusMessage(result);
+                var status = BuildCodexSessionRestoreStatusMessage(result);
+                if (result.Succeeded)
+                {
+                    status += " " + T(clientOpened
+                        ? "codexSessions.status.clientRestarted"
+                        : "codexSessions.status.clientUnavailable");
+                }
+
+                CodexSessionStatusMessage = status;
                 StatusMessage = CodexSessionStatusMessage;
             });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             CodexSessionStatusMessage = F("codexSessions.status.failed", ex.Message);
+            StatusMessage = CodexSessionStatusMessage;
         }
         finally
         {
+            if (clientStopped)
+                await Task.Run(_codexDesktopClientLauncher.TryLaunch);
             IsCodexSessionRestoring = false;
         }
     }
@@ -1168,6 +1253,10 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         CodexSessionTotalCount = inspection.TotalSessionFileCount;
         CodexSessionCurrentProviderCount = inspection.ManagedSessionFileCount;
         CodexSessionMigratableCount = inspection.MigratableSessionFileCount;
+        CodexSessionMigratableIndexCount = inspection.Providers
+            .Where(provider => !provider.IsManagedProvider)
+            .Sum(provider => provider.ThreadIndexCount);
+        CodexSessionRepairableCount = inspection.RepairableSessionCount;
         CodexSessionRestorableCount = inspection.RestorableSessionFileCount;
         CodexSessionRestorableIndexCount = inspection.RestorableThreadIndexCount;
         CodexSessionStatusMessage = BuildCodexSessionStatusMessage(inspection);
@@ -1180,6 +1269,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private string BuildCodexSessionStatusMessage(CodexSessionInspection inspection)
     {
         var message = F("codexSessions.status.ready", inspection.TotalSessionFileCount, inspection.Providers.Count);
+        if (inspection.RepairableSessionCount > 0)
+            message += " " + F("codexSessions.status.repairDetected", inspection.RepairableSessionCount);
         if (!string.IsNullOrWhiteSpace(inspection.StateIndexStatus))
             message += " " + F("codexSessions.status.indexWarning", FormatCodexSessionIndexStatus(inspection.StateIndexStatus));
 
@@ -1188,6 +1279,11 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     private string BuildCodexSessionMigrationStatusMessage(CodexSessionMigrationResult result)
     {
+        if (!result.Succeeded)
+            return F(
+                "codexSessions.status.migrationFailedSafe",
+                FormatCodexSessionIndexStatus(result.StateIndexStatus ?? "migration-failed"));
+
         var message = F("codexSessions.status.migrated", result.UpdatedSessionFiles, result.UpdatedThreadIndexEntries);
         if (result.FailedFiles.Count > 0)
             message += " " + F("codexSessions.status.failedFiles", result.FailedFiles.Count);
@@ -1199,6 +1295,11 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     private string BuildCodexSessionRestoreStatusMessage(CodexSessionRestoreResult result)
     {
+        if (!result.Succeeded)
+            return F(
+                "codexSessions.status.restoreFailedSafe",
+                FormatCodexSessionIndexStatus(result.StateIndexStatus ?? "migration-failed"));
+
         var message = F("codexSessions.status.restored", result.RestoredSessionFiles, result.RestoredThreadIndexEntries);
         if (result.FailedFiles.Count > 0)
             message += " " + F("codexSessions.status.failedRestoreFiles", result.FailedFiles.Count);
@@ -1216,6 +1317,12 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             "sqlite-missing" => T("codexSessions.status.sqliteMissing"),
             "sqlite-timeout" => T("codexSessions.status.sqliteTimeout"),
             "sqlite-failed" => T("codexSessions.status.sqliteFailed"),
+            "state-db-locked" => T("codexSessions.status.stateDbLocked"),
+            "state-db-failed" => T("codexSessions.status.stateDbFailed"),
+            "session-file-failed" => T("codexSessions.status.sessionFileFailed"),
+            "session-index-mismatch" => T("codexSessions.status.sessionIndexMismatch"),
+            "rollback-failed" => T("codexSessions.status.rollbackFailed"),
+            "migration-failed" => T("codexSessions.status.migrationFailed"),
             _ => status
         };
     }
@@ -1601,9 +1708,35 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         }
 
         _isSyncingProviderToCodex = true;
+        var clientStopped = false;
+        var migrationCompleted = false;
+        CodexManagedFilesSnapshot? managedFilesSnapshot = null;
+        var previousActiveCodexProviderId = _config.ActiveCodexProviderId;
+        var previousActiveProviderId = _config.ActiveProviderId;
+        var previousManageCodexConfig = _config.Proxy.ManageCodexConfig;
         try
         {
             StatusMessage = T("status.providerSyncingToCodex");
+            managedFilesSnapshot = _codexConfigWriter.CaptureManagedFilesSnapshot();
+            clientStopped = await Task.Run(_codexDesktopClientLauncher.TryStop);
+            if (!clientStopped)
+            {
+                StatusMessage = T("status.providerSyncToCodexClientStopFailed");
+                return;
+            }
+
+            var migrationResult = await Task.Run(_codexSessionMigrationService.MigrateToManagedProvider);
+            if (!migrationResult.Succeeded)
+            {
+                await Task.Run(_codexDesktopClientLauncher.TryLaunch);
+                clientStopped = false;
+                StatusMessage = F(
+                    "status.providerSyncToCodexSessionMigrationFailed",
+                    FormatCodexSessionIndexStatus(migrationResult.StateIndexStatus ?? "migration-failed"));
+                return;
+            }
+
+            migrationCompleted = true;
             _config.ActiveCodexProviderId = provider.Id;
             _config.ActiveProviderId = provider.Id;
             // An explicit sync is consent to keep Codex pointed at the managed
@@ -1620,11 +1753,28 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
             if (_proxyHostService.State.Error is not null)
             {
-                StatusMessage = F("status.providerSyncToCodexFailed", _proxyHostService.State.Error);
+                var proxyError = _proxyHostService.State.Error;
+                var rollbackError = await RollBackProviderSyncAsync(
+                    managedFilesSnapshot,
+                    previousActiveCodexProviderId,
+                    previousActiveProviderId,
+                    previousManageCodexConfig,
+                    restoreSessions: migrationCompleted);
+                if (rollbackError is null)
+                {
+                    await Task.Run(_codexDesktopClientLauncher.TryLaunch);
+                    clientStopped = false;
+                    StatusMessage = F("status.providerSyncToCodexFailed", proxyError);
+                }
+                else
+                {
+                    StatusMessage = F("status.providerSyncToCodexRollbackFailed", rollbackError);
+                }
                 return;
             }
 
-            var clientOpened = await Task.Run(_codexDesktopClientLauncher.TryRestart);
+            var clientOpened = await Task.Run(_codexDesktopClientLauncher.TryLaunch);
+            clientStopped = false;
             var providerName = string.IsNullOrWhiteSpace(provider.DisplayName)
                 ? provider.Id
                 : provider.DisplayName;
@@ -1634,12 +1784,96 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            StatusMessage = F("status.providerSyncToCodexFailed", ex.Message);
+            var rollbackError = managedFilesSnapshot is null
+                ? null
+                : await RollBackProviderSyncAsync(
+                    managedFilesSnapshot,
+                    previousActiveCodexProviderId,
+                    previousActiveProviderId,
+                    previousManageCodexConfig,
+                    restoreSessions: migrationCompleted);
+            if (clientStopped && rollbackError is null)
+            {
+                await Task.Run(_codexDesktopClientLauncher.TryLaunch);
+                clientStopped = false;
+            }
+
+            StatusMessage = rollbackError is null
+                ? F("status.providerSyncToCodexFailed", ex.Message)
+                : F("status.providerSyncToCodexRollbackFailed", rollbackError);
         }
         finally
         {
             _isSyncingProviderToCodex = false;
         }
+    }
+
+    private async Task<string?> RollBackProviderSyncAsync(
+        CodexManagedFilesSnapshot managedFilesSnapshot,
+        string previousActiveCodexProviderId,
+        string previousActiveProviderId,
+        bool previousManageCodexConfig,
+        bool restoreSessions)
+    {
+        var errors = new List<string>();
+        _config.ActiveCodexProviderId = previousActiveCodexProviderId;
+        _config.ActiveProviderId = previousActiveProviderId;
+        _config.Proxy.ManageCodexConfig = previousManageCodexConfig;
+        ManageCodexConfig = previousManageCodexConfig;
+
+        try
+        {
+            _store.SaveConfig(_config);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            errors.Add(ex.Message);
+        }
+
+        try
+        {
+            _codexConfigWriter.RestoreManagedFilesSnapshot(managedFilesSnapshot);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            errors.Add(ex.Message);
+        }
+
+        if (restoreSessions)
+        {
+            try
+            {
+                var restoreResult = await Task.Run(_codexSessionMigrationService.RestoreOriginalProviders);
+                if (!restoreResult.Succeeded)
+                {
+                    errors.Add(FormatCodexSessionIndexStatus(
+                        restoreResult.StateIndexStatus ?? "migration-failed"));
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                errors.Add(ex.Message);
+            }
+        }
+
+        try
+        {
+            RefreshProviderRows();
+            RefreshModelCatalogRows();
+            SelectProvider(FindProviderRow(ClientAppKind.Codex, previousActiveCodexProviderId));
+            if (errors.Count == 0)
+            {
+                await ReloadProxyConfigAsync();
+                if (_proxyHostService.State.Error is not null)
+                    errors.Add(_proxyHostService.State.Error);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            errors.Add(ex.Message);
+        }
+
+        return errors.Count == 0 ? null : string.Join("; ", errors.Distinct(StringComparer.Ordinal));
     }
 
     private async Task RefreshProviderModelsAsync()
@@ -5157,6 +5391,18 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     partial void OnCodexSessionMigratableCountChanged(int value)
     {
         OnCodexSessionActionStateChanged();
+        OnPropertyChanged(nameof(CodexSessionMigratableDetail));
+    }
+
+    partial void OnCodexSessionMigratableIndexCountChanged(int value)
+    {
+        OnCodexSessionActionStateChanged();
+        OnPropertyChanged(nameof(CodexSessionMigratableDetail));
+    }
+
+    partial void OnCodexSessionRepairableCountChanged(int value)
+    {
+        OnCodexSessionActionStateChanged();
     }
 
     partial void OnCodexSessionRestorableCountChanged(int value)
@@ -5181,6 +5427,11 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         OnCodexSessionActionStateChanged();
     }
 
+    partial void OnIsCodexSessionRepairingChanged(bool value)
+    {
+        OnCodexSessionActionStateChanged();
+    }
+
     partial void OnIsCodexSessionRestoringChanged(bool value)
     {
         OnCodexSessionActionStateChanged();
@@ -5189,8 +5440,10 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private void OnCodexSessionActionStateChanged()
     {
         OnPropertyChanged(nameof(CanMigrateCodexSessions));
+        OnPropertyChanged(nameof(CanRepairCodexSessions));
         OnPropertyChanged(nameof(CanRestoreCodexSessions));
         OnPropertyChanged(nameof(CodexSessionMigrationButtonText));
+        OnPropertyChanged(nameof(CodexSessionRepairButtonText));
         OnPropertyChanged(nameof(CodexSessionRestoreButtonText));
         OnPropertyChanged(nameof(CodexSessionRefreshButtonText));
     }
@@ -5467,23 +5720,38 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public string CodexSessionTotalDetail => F("codexSessions.totalSessionsDetail", CodexSessionProviderRows.Count);
 
-    public string CodexSessionMigratableDetail => F("codexSessions.migratableDetail", CodexSessionCurrentProvider);
+    public string CodexSessionMigratableDetail => F(
+        "codexSessions.migratableDetail",
+        CodexSessionCurrentProvider,
+        CodexSessionMigratableIndexCount);
 
     public string CodexSessionRestorableDetail => F("codexSessions.restorableDetail", CodexSessionRestorableIndexCount);
 
     public bool CanMigrateCodexSessions => !IsCodexSessionRefreshing &&
         !IsCodexSessionMigrating &&
+        !IsCodexSessionRepairing &&
         !IsCodexSessionRestoring &&
-        CodexSessionMigratableCount > 0;
+        (CodexSessionMigratableCount > 0 || CodexSessionMigratableIndexCount > 0);
+
+    public bool CanRepairCodexSessions => !IsCodexSessionRefreshing &&
+        !IsCodexSessionMigrating &&
+        !IsCodexSessionRepairing &&
+        !IsCodexSessionRestoring &&
+        CodexSessionRepairableCount > 0;
 
     public bool CanRestoreCodexSessions => !IsCodexSessionRefreshing &&
         !IsCodexSessionMigrating &&
+        !IsCodexSessionRepairing &&
         !IsCodexSessionRestoring &&
         (CodexSessionRestorableCount > 0 || CodexSessionRestorableIndexCount > 0);
 
     public string CodexSessionMigrationButtonText => IsCodexSessionMigrating
         ? T("codexSessions.migrating")
         : T("codexSessions.migrate");
+
+    public string CodexSessionRepairButtonText => IsCodexSessionRepairing
+        ? T("codexSessions.repairing")
+        : F("codexSessions.repair", CodexSessionRepairableCount);
 
     public string CodexSessionRestoreButtonText => IsCodexSessionRestoring
         ? T("codexSessions.restoring")

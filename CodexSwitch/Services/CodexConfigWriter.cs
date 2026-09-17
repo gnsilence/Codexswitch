@@ -103,6 +103,21 @@ public sealed class CodexConfigWriter
         ManagedFileBackup.RestoreOriginal(_paths.CodexModelCatalogPath);
     }
 
+    public CodexManagedFilesSnapshot CaptureManagedFilesSnapshot()
+    {
+        return new CodexManagedFilesSnapshot(
+            ReadFileSnapshot(_paths.CodexConfigPath),
+            ReadFileSnapshot(_paths.CodexAuthPath),
+            ReadFileSnapshot(_paths.CodexModelCatalogPath));
+    }
+
+    public void RestoreManagedFilesSnapshot(CodexManagedFilesSnapshot snapshot)
+    {
+        RestoreFileSnapshot(_paths.CodexConfigPath, snapshot.ConfigToml);
+        RestoreFileSnapshot(_paths.CodexAuthPath, snapshot.AuthJson);
+        RestoreFileSnapshot(_paths.CodexModelCatalogPath, snapshot.ModelCatalog);
+    }
+
     private void WriteConfigToml(AppConfig config)
     {
         var existing = File.Exists(_paths.CodexConfigPath)
@@ -798,6 +813,34 @@ public sealed class CodexConfigWriter
         File.Move(tempPath, path, overwrite: true);
     }
 
+    private static byte[]? ReadFileSnapshot(string path)
+    {
+        return File.Exists(path) ? File.ReadAllBytes(path) : null;
+    }
+
+    private static void RestoreFileSnapshot(string path, byte[]? content)
+    {
+        if (content is null)
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var tempPath = path + "." + Guid.NewGuid().ToString("N") + ".restore.tmp";
+        try
+        {
+            File.WriteAllBytes(tempPath, content);
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
     private static string EscapeToml(string value)
     {
         return value.Replace("\\", "\\\\", StringComparison.Ordinal)
@@ -823,3 +866,8 @@ public sealed class CodexConfigWriter
         public List<string> Lines { get; set; } = [];
     }
 }
+
+public sealed record CodexManagedFilesSnapshot(
+    byte[]? ConfigToml,
+    byte[]? AuthJson,
+    byte[]? ModelCatalog);
