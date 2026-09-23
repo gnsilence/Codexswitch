@@ -2,7 +2,7 @@ namespace CodexSwitch.Services;
 
 public sealed class ConfigurationStore
 {
-    private const int CurrentConfigSchemaVersion = 3;
+    private const int CurrentConfigSchemaVersion = 4;
     private readonly AppPaths _paths;
 
     public ConfigurationStore(AppPaths paths)
@@ -88,6 +88,8 @@ public sealed class ConfigurationStore
             config.Network.OutboundHttpVersion = OutboundHttpVersion.Http2;
         if (config.Network.ConnectTimeoutSeconds <= 0)
             config.Network.ConnectTimeoutSeconds = 30;
+        config.Network.MaxRetries = Math.Clamp(config.Network.MaxRetries, 0, 5);
+        config.Network.RetryBaseDelaySeconds = Math.Clamp(config.Network.RetryBaseDelaySeconds, 1, 10);
         config.Network.CustomProxyUrl = config.Network.CustomProxyUrl?.Trim() ?? "";
         if (config.Proxy.UseFakeCodexAppAuth)
             config.Proxy.PreserveCodexAppAuth = false;
@@ -100,6 +102,8 @@ public sealed class ConfigurationStore
         if (previousSchemaVersion < 3)
             MigrateOpenAiResponsesProtocols(config);
         EnsureRequiredBuiltIns(config);
+        if (previousSchemaVersion < 4)
+            MigrateNewGpt6Models(config);
         if (previousSchemaVersion < 1)
             MigrateLegacyAiossBillingMultipliers(config);
         EnsureProviderClientSupport(config);
@@ -613,6 +617,31 @@ public sealed class ConfigurationStore
         }
 
         existing.Cost ??= new ProviderCostSettings { FastMode = templateModel.FastMode };
+    }
+
+    private static void MigrateNewGpt6Models(AppConfig config)
+    {
+        foreach (var provider in config.Providers)
+        {
+            var models = provider.BuiltinId?.ToLowerInvariant() switch
+            {
+                ProviderTemplateCatalog.AiossPlusBuiltinId or
+                ProviderTemplateCatalog.AiossProBuiltinId or
+                ProviderTemplateCatalog.OpenAiOfficialBuiltinId => BuiltInModelCatalog.OpenAiOfficialModels,
+                ProviderTemplateCatalog.RoutinAiBuiltinId or
+                ProviderTemplateCatalog.RoutinAiPlanBuiltinId => BuiltInModelCatalog.RoutinAiModels,
+                _ => null
+            };
+            if (models is null)
+                continue;
+
+            provider.Models ??= [];
+            foreach (var model in models.Where(model => model.Id is "gpt-6-sol" or "gpt-6-luna"))
+            {
+                if (!provider.Models.Any(route => string.Equals(route.Id, model.Id, StringComparison.OrdinalIgnoreCase)))
+                    UpsertModelRoute(provider.Models, model);
+            }
+        }
     }
 
     private static bool EnsurePricingDefaults(ModelPricingCatalog catalog)

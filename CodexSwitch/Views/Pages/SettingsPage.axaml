@@ -179,16 +179,32 @@
                                   Title="{i18n:Tr settings.outboundConnection.title}"
                                   Description="{i18n:Tr settings.outboundConnection.description}"
                                   IsVisible="{Binding IsRouteSettingsVisible}">
-                    <Grid ColumnDefinitions="*,160"
-                          ColumnSpacing="12">
-                        <cui:CodexField Label="{i18n:Tr settings.outboundConnection.httpVersion}">
-                            <cui:CodexSelect ItemsSource="{Binding HttpVersionOptions}"
-                                             SelectedItem="{Binding NetworkHttpVersion, Mode=TwoWay}"/>
-                        </cui:CodexField>
-                        <cui:CodexField Grid.Column="1" Label="{i18n:Tr settings.outboundConnection.connectTimeout}">
-                            <cui:CodexTextBox Text="{Binding NetworkConnectTimeoutSeconds}"/>
-                        </cui:CodexField>
-                    </Grid>
+                    <StackPanel Spacing="12">
+                        <Grid ColumnDefinitions="*,160"
+                              ColumnSpacing="12">
+                            <cui:CodexField Label="{i18n:Tr settings.outboundConnection.httpVersion}">
+                                <cui:CodexSelect ItemsSource="{Binding HttpVersionOptions}"
+                                                 SelectedItem="{Binding NetworkHttpVersion, Mode=TwoWay}"/>
+                            </cui:CodexField>
+                            <cui:CodexField Grid.Column="1" Label="{i18n:Tr settings.outboundConnection.connectTimeout}">
+                                <cui:CodexTextBox Text="{Binding NetworkConnectTimeoutSeconds}"/>
+                            </cui:CodexField>
+                        </Grid>
+                        <cui:CodexSwitch Content="{i18n:Tr settings.outboundConnection.retryEnabled}"
+                                         IsChecked="{Binding NetworkRetryEnabled}"/>
+                        <Grid ColumnDefinitions="*,*"
+                              ColumnSpacing="12">
+                            <cui:CodexField Label="{i18n:Tr settings.outboundConnection.maxRetries}">
+                                <cui:CodexTextBox Text="{Binding NetworkMaxRetries}"/>
+                            </cui:CodexField>
+                            <cui:CodexField Grid.Column="1" Label="{i18n:Tr settings.outboundConnection.retryBaseDelay}">
+                                <cui:CodexTextBox Text="{Binding NetworkRetryBaseDelaySeconds}"/>
+                            </cui:CodexField>
+                        </Grid>
+                        <ui:CsText Text="{i18n:Tr settings.outboundConnection.retryNotice}"
+                                   Classes="muted"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
                 </cui:CodexSection>
 
                 <cui:CodexSection Title="{i18n:Tr settings.auth.title}"

@@ -124,7 +124,12 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                 catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
                 {
                     return context.HttpContext.Response.HasStarted
-                        ? ProviderAdapterResult.ResponseAlreadyStartedFailure(StatusCodes.Status502BadGateway, ex.Message)
+                        ? ProtocolAdapterCommon.RecordResponseAlreadyStartedFailure(
+                            context,
+                            requestModel,
+                            isStream,
+                            stopwatch,
+                            ex)
                         : ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
                 }
             }
@@ -146,7 +151,10 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                 ProtocolAdapterCommon.Record(context, errorRecord);
 
                 if (ProtocolAdapterCommon.IsTransientStatusCode(upstreamResponse.StatusCode))
-                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted((int)upstreamResponse.StatusCode, responseBody);
+                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                        (int)upstreamResponse.StatusCode,
+                        responseBody,
+                        ProtocolAdapterCommon.GetRetryAfter(upstreamResponse));
 
                 context.HttpContext.Response.StatusCode = (int)upstreamResponse.StatusCode;
                 ProtocolAdapterCommon.CopyContentHeaders(upstreamResponse, context.HttpContext.Response);
@@ -175,11 +183,14 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                     null,
                     ex.Message);
                 ProtocolAdapterCommon.Record(context, errorRecord);
-                await ProtocolAdapterCommon.WriteJsonErrorAsync(
-                    context.HttpContext,
-                    HttpStatusCode.BadGateway,
-                    "OpenAI Chat upstream returned invalid JSON.",
-                    cancellationToken);
+                if (context.IsFinalRetryAttempt)
+                {
+                    await ProtocolAdapterCommon.WriteJsonErrorAsync(
+                        context.HttpContext,
+                        HttpStatusCode.BadGateway,
+                        "OpenAI Chat upstream returned invalid JSON.",
+                        cancellationToken);
+                }
                 return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
             }
 
@@ -290,7 +301,12 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                 catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
                 {
                     return context.HttpContext.Response.HasStarted
-                        ? ProviderAdapterResult.ResponseAlreadyStartedFailure(StatusCodes.Status502BadGateway, ex.Message)
+                        ? ProtocolAdapterCommon.RecordResponseAlreadyStartedFailure(
+                            context,
+                            requestModel,
+                            isStream,
+                            stopwatch,
+                            ex)
                         : ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
                 }
             }
@@ -312,7 +328,10 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                 ProtocolAdapterCommon.Record(context, errorRecord);
 
                 if (ProtocolAdapterCommon.IsTransientStatusCode(upstreamResponse.StatusCode))
-                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted((int)upstreamResponse.StatusCode, responseBody);
+                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                        (int)upstreamResponse.StatusCode,
+                        responseBody,
+                        ProtocolAdapterCommon.GetRetryAfter(upstreamResponse));
 
                 context.HttpContext.Response.StatusCode = (int)upstreamResponse.StatusCode;
                 ProtocolAdapterCommon.CopyContentHeaders(upstreamResponse, context.HttpContext.Response);
@@ -341,11 +360,14 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                     null,
                     ex.Message);
                 ProtocolAdapterCommon.Record(context, errorRecord);
-                await ProtocolAdapterCommon.WriteJsonErrorAsync(
-                    context.HttpContext,
-                    HttpStatusCode.BadGateway,
-                    "OpenAI Chat upstream returned invalid JSON.",
-                    cancellationToken);
+                if (context.IsFinalRetryAttempt)
+                {
+                    await ProtocolAdapterCommon.WriteJsonErrorAsync(
+                        context.HttpContext,
+                        HttpStatusCode.BadGateway,
+                        "OpenAI Chat upstream returned invalid JSON.",
+                        cancellationToken);
+                }
                 return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
             }
 
@@ -3603,11 +3625,7 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
         CancellationToken cancellationToken)
     {
         var state = new ChatStreamingState();
-        await ProtocolAdapterCommon.WriteSseEventAsync(
-            context.HttpContext,
-            "response.created",
-            BuildCreatedEventJson(context.RequestRoot, requestData, state),
-            cancellationToken);
+        var responseCreated = false;
 
         await using var stream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream, Encoding.UTF8);
@@ -3629,7 +3647,25 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                 break;
 
             using var document = JsonDocument.Parse(data);
+            if (!responseCreated)
+            {
+                await ProtocolAdapterCommon.WriteSseEventAsync(
+                    context.HttpContext,
+                    "response.created",
+                    BuildCreatedEventJson(context.RequestRoot, requestData, state),
+                    cancellationToken);
+                responseCreated = true;
+            }
             ProcessChatStreamChunk(context, state, document.RootElement, cancellationToken);
+        }
+
+        if (!responseCreated)
+        {
+            await ProtocolAdapterCommon.WriteSseEventAsync(
+                context.HttpContext,
+                "response.created",
+                BuildCreatedEventJson(context.RequestRoot, requestData, state),
+                cancellationToken);
         }
 
         FinalizeChatStreamOutputItems(state);

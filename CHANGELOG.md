@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.0.7] - 2026-09-23
+
+### Added
+
+- Added configurable upstream retries for transient HTTP and WebSocket failures before any response content is sent to Codex.
+- Added GPT-6 Sol and GPT-6 Luna provider routes and usage pricing, including long-context rates.
+
+### Changed
+
+- Added outbound connection settings for enabling retries, setting the retry limit, and configuring the base delay.
+- Upgraded existing built-in provider catalogs with the new GPT-6 routes while preserving user customizations.
+
 ## [v0.0.6] - 2026-09-17
 
 ### Added

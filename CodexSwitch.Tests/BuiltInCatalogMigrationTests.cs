@@ -74,6 +74,8 @@ public sealed class BuiltInCatalogMigrationTests
             Assert.Equal(
                 [
                     "gpt-6-astra",
+                    "gpt-6-sol",
+                    "gpt-6-luna",
                     "gpt-5.6-sol",
                     "gpt-5.5",
                     "gpt-5.6-terra",
@@ -126,11 +128,44 @@ public sealed class BuiltInCatalogMigrationTests
     }
 
     [Fact]
+    public void LoadPricing_RefreshesNewGpt6RulesFromPreviousCatalog()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root, Path.Combine(root, ".codex"));
+            var store = new ConfigurationStore(paths);
+            WriteJson(paths.PricingPath, new ModelPricingCatalog
+            {
+                SchemaVersion = "1.6",
+                Models =
+                {
+                    new ModelPricingRule { Id = "gpt-6-sol", Input = FlatTable(99m) },
+                    new ModelPricingRule { Id = "custom-model", Input = FlatTable(3m) }
+                }
+            });
+
+            var upgraded = store.LoadPricing();
+
+            Assert.Equal(BuiltInModelCatalog.PricingSchemaVersion, upgraded.SchemaVersion);
+            AssertGptPricing(upgraded.Models, "gpt-6-sol", 2m, 4m, 0.20m, 0.40m, 2.50m, 5m, 10m, 15m);
+            AssertGptPricing(upgraded.Models, "gpt-6-luna", 0.10m, 0.20m, 0.01m, 0.02m, 0.125m, 0.25m, 0.50m, 0.75m);
+            AssertFlatPrice(Assert.Single(upgraded.Models, rule => rule.Id == "custom-model").Input, 3m);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void BuiltInPricing_UsesProvidedGptRates()
     {
         var rules = BuiltInModelCatalog.CreatePricingRules();
 
         AssertGptPricing(rules, "gpt-6-astra", 10m, 20m, 1m, 2m, 12.50m, 25m, 50m, 75m);
+        AssertGptPricing(rules, "gpt-6-sol", 2m, 4m, 0.20m, 0.40m, 2.50m, 5m, 10m, 15m);
+        AssertGptPricing(rules, "gpt-6-luna", 0.10m, 0.20m, 0.01m, 0.02m, 0.125m, 0.25m, 0.50m, 0.75m);
         AssertGptPricing(rules, "gpt-5.6-sol", 5m, 10m, 0.50m, 1m, 6.25m, 12.50m, 30m, 45m);
         AssertGptPricing(rules, "gpt-5.5", 5m, 10m, 0.50m, 1m, null, null, 30m, 45m);
         AssertGptPricing(rules, "gpt-5.6-terra", 2m, 4m, 0.20m, 0.40m, 2.50m, 5m, 12m, 18m);
@@ -147,6 +182,8 @@ public sealed class BuiltInCatalogMigrationTests
         var aiossPlus = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.AiossPlusBuiltinId, []);
 
         Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-6-astra");
+        Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-6-sol");
+        Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-6-luna");
         Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-5.6-sol");
         Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-5.6-terra");
         Assert.Contains(aiossPlus.Models, route => route.Id == "gpt-5.6-luna");
@@ -328,6 +365,8 @@ public sealed class BuiltInCatalogMigrationTests
                 string.Equals(provider.BuiltinId, ProviderTemplateCatalog.AiossProBuiltinId, StringComparison.OrdinalIgnoreCase));
 
             Assert.DoesNotContain(openAi.Models, model => model.Id == "gpt-5.4");
+            Assert.Contains(openAi.Models, model => model.Id == "gpt-6-sol");
+            Assert.Contains(openAi.Models, model => model.Id == "gpt-6-luna");
             Assert.DoesNotContain(openAi.Models, model => model.Id == "gpt-5.4-mini");
             Assert.DoesNotContain(openAi.Models, model => model.Id == "gpt-5.3-codex");
             AssertDefaultConversion(openAi);
@@ -393,6 +432,58 @@ public sealed class BuiltInCatalogMigrationTests
     }
 
     [Fact]
+    public void LoadConfig_AddsOnlyNewGpt6RoutesToExistingOpenAiBuiltIns()
+    {
+        var root = CreateTempDirectory();
+        try
+        {
+            var paths = new AppPaths(root, Path.Combine(root, ".codex"));
+            var store = new ConfigurationStore(paths);
+            var aioss = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.AiossPlusBuiltinId, []);
+            aioss.Models.Remove(aioss.Models.Single(model => model.Id == "gpt-6-luna"));
+            aioss.Models.Single(model => model.Id == "gpt-6-sol").DisplayName = "My 6 Sol";
+            aioss.Models.Single(model => model.Id == "gpt-5.6-sol").DisplayName = "My Sol";
+            var routin = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.RoutinAiBuiltinId, []);
+            routin.Models.Clear();
+            var custom = new ProviderConfig
+            {
+                Id = "custom",
+                DefaultModel = "custom-model",
+                Models = { new ModelRouteConfig { Id = "custom-model" } }
+            };
+            WriteJson(paths.ConfigPath, new AppConfig
+            {
+                SchemaVersion = 3,
+                ActiveProviderId = aioss.Id,
+                Providers = { aioss, routin, custom }
+            });
+
+            var upgraded = store.LoadConfig();
+            var updatedAioss = upgraded.Providers.Single(provider => provider.Id == aioss.Id);
+            var updatedRoutin = upgraded.Providers.Single(provider => provider.Id == routin.Id);
+
+            Assert.Equal(4, upgraded.SchemaVersion);
+            Assert.Equal("My 6 Sol", updatedAioss.Models.Single(model => model.Id == "gpt-6-sol").DisplayName);
+            Assert.Equal("My Sol", updatedAioss.Models.Single(model => model.Id == "gpt-5.6-sol").DisplayName);
+            Assert.Equal(1, updatedAioss.Models.Count(model => model.Id == "gpt-6-sol"));
+            Assert.Equal(1, updatedAioss.Models.Count(model => model.Id == "gpt-6-luna"));
+            Assert.True(updatedRoutin.Models.Single(model => model.Id == "gpt-6-sol").Cost?.FastMode);
+            Assert.True(updatedRoutin.Models.Single(model => model.Id == "gpt-6-luna").Cost?.FastMode);
+            Assert.Single(upgraded.Providers.Single(provider => provider.Id == custom.Id).Models);
+
+            updatedAioss.Models.Remove(updatedAioss.Models.Single(model => model.Id == "gpt-6-luna"));
+            store.SaveConfig(upgraded);
+            var reloaded = store.LoadConfig();
+            Assert.DoesNotContain(reloaded.Providers.Single(provider => provider.Id == aioss.Id).Models,
+                model => model.Id == "gpt-6-luna");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void GrokTemplate_UsesAiossEndpointAndGrok46Route()
     {
         var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.GrokBuiltinId, []);
@@ -450,7 +541,7 @@ public sealed class BuiltInCatalogMigrationTests
             var provider = Assert.Single(
                 reloaded.Providers,
                 item => string.Equals(item.BuiltinId, ProviderTemplateCatalog.DeepSeekBuiltinId, StringComparison.OrdinalIgnoreCase));
-            Assert.Equal(3, reloaded.SchemaVersion);
+            Assert.Equal(4, reloaded.SchemaVersion);
             Assert.Equal(ProviderProtocol.OpenAiResponses, provider.Protocol);
             Assert.All(provider.Models, route => Assert.Equal(ProviderProtocol.OpenAiResponses, route.Protocol));
         }
@@ -500,7 +591,7 @@ public sealed class BuiltInCatalogMigrationTests
             var reloaded = store.LoadConfig();
             var saved = Assert.Single(reloaded.Providers, item => item.Id == provider.Id);
 
-            Assert.Equal(3, reloaded.SchemaVersion);
+            Assert.Equal(4, reloaded.SchemaVersion);
             Assert.Equal("https://custom.example/v1", saved.BaseUrl);
             Assert.Equal(ProviderProtocol.AnthropicMessages, saved.Protocol);
             Assert.Equal("custom note", saved.Note);
@@ -527,7 +618,7 @@ public sealed class BuiltInCatalogMigrationTests
 
             var config = new AppConfig
             {
-                SchemaVersion = 3,
+                SchemaVersion = 4,
                 ActiveProviderId = provider.Id,
                 Providers = { provider }
             };
@@ -1024,6 +1115,8 @@ public sealed class BuiltInCatalogMigrationTests
         Assert.Equal(0.13m, provider.Cost?.Multiplier);
 
         Assert.Contains(provider.Models, model => model.Id == "gpt-6-astra");
+        Assert.Contains(provider.Models, model => model.Id == "gpt-6-sol");
+        Assert.Contains(provider.Models, model => model.Id == "gpt-6-luna");
         Assert.Contains(provider.Models, model => model.Id == "gpt-5.6-sol");
         Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.6");
         Assert.DoesNotContain(provider.Models, model => model.Id == "gpt-5.4-mini");

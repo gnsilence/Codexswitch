@@ -262,6 +262,8 @@ public sealed class CodexConfigWriterTests : IDisposable
             .Select(model => model.GetProperty("slug").GetString())
             .ToArray();
         Assert.Contains("gpt-6-astra", slugs);
+        Assert.Contains("gpt-6-sol", slugs);
+        Assert.Contains("gpt-6-luna", slugs);
         Assert.Contains("gpt-5.6-sol", slugs);
         Assert.Contains("gpt-5.6-terra", slugs);
         Assert.Contains("gpt-5.6-luna", slugs);
@@ -304,6 +306,50 @@ public sealed class CodexConfigWriterTests : IDisposable
                 .EnumerateArray()
                 .Select(level => level.GetProperty("effort").GetString() ?? "")
                 .ToArray());
+    }
+
+    [Theory]
+    [InlineData("gpt-6-sol")]
+    [InlineData("gpt-6-luna")]
+    public void Apply_NewGpt6ModelsSupportSameReasoningLevelsAsGpt56Sol(string modelId)
+    {
+        var paths = new AppPaths(
+            Path.Combine(_tempDirectory, modelId, "appdata"),
+            Path.Combine(_tempDirectory, modelId, "codex"));
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"ultra\"\n");
+
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "custom-gpt",
+            ActiveProviderId = "custom-gpt",
+            Proxy = { ManageCodexConfig = true },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "custom-gpt",
+                    Protocol = ProviderProtocol.OpenAiResponses,
+                    SupportsCodex = true,
+                    DefaultModel = modelId,
+                    Models =
+                    {
+                        new ModelRouteConfig { Id = modelId, Protocol = ProviderProtocol.OpenAiResponses }
+                    }
+                }
+            }
+        });
+
+        using var catalog = JsonDocument.Parse(File.ReadAllText(paths.CodexModelCatalogPath));
+        var models = catalog.RootElement.GetProperty("models");
+        var levels = models.EnumerateArray()
+            .Single(model => model.GetProperty("slug").GetString() == modelId)
+            .GetProperty("supported_reasoning_levels")
+            .EnumerateArray()
+            .Select(level => level.GetProperty("effort").GetString() ?? "")
+            .ToArray();
+        Assert.Equal(["low", "medium", "high", "xhigh", "max", "ultra"], levels);
+        Assert.Contains("model_reasoning_effort = \"ultra\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
     }
 
     [Fact]

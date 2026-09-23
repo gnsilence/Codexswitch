@@ -103,6 +103,23 @@ public sealed class ProviderRequestContext
 
     public UsageLogWriter UsageLogWriter { get; }
 
+    public int RetryAttempt { get; private set; }
+
+    public int MaxRetryAttempts { get; private set; }
+
+    public bool IsFinalRetryAttempt => RetryAttempt >= MaxRetryAttempts;
+
+    public void SetRetryAttempt(int retryAttempt, int maxRetryAttempts)
+    {
+        RetryAttempt = Math.Max(0, retryAttempt);
+        MaxRetryAttempts = Math.Max(0, maxRetryAttempts);
+    }
+
+    public void MarkRetryFinalAttempt()
+    {
+        MaxRetryAttempts = RetryAttempt;
+    }
+
     public string? ResolveAuthorizationToken()
     {
         return Provider.AuthMode == ProviderAuthMode.OAuth

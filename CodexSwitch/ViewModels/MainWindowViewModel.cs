@@ -372,6 +372,15 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private int _networkConnectTimeoutSeconds = 30;
 
     [ObservableProperty]
+    private bool _networkRetryEnabled = true;
+
+    [ObservableProperty]
+    private int _networkMaxRetries = 2;
+
+    [ObservableProperty]
+    private int _networkRetryBaseDelaySeconds = 1;
+
+    [ObservableProperty]
     private bool _preserveCodexAppAuth;
 
     [ObservableProperty]
@@ -1512,7 +1521,10 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             !string.Equals(_config.Network.CustomProxyUrl?.Trim() ?? "", networkProxyUrl, StringComparison.Ordinal) ||
             _config.Network.BypassProxyOnLocal != NetworkProxyBypassOnLocal ||
             _config.Network.OutboundHttpVersion != NetworkHttpVersion ||
-            _config.Network.ConnectTimeoutSeconds != NormalizeConnectTimeoutSeconds(NetworkConnectTimeoutSeconds);
+            _config.Network.ConnectTimeoutSeconds != NormalizeConnectTimeoutSeconds(NetworkConnectTimeoutSeconds) ||
+            _config.Network.RetryEnabled != NetworkRetryEnabled ||
+            _config.Network.MaxRetries != NormalizeMaxRetries(NetworkMaxRetries) ||
+            _config.Network.RetryBaseDelaySeconds != NormalizeRetryBaseDelaySeconds(NetworkRetryBaseDelaySeconds);
 
         _config.Proxy.Host = string.IsNullOrWhiteSpace(ProxyListenHost) ? "127.0.0.1" : ProxyListenHost.Trim();
         _config.Proxy.Port = ProxyPort <= 0 ? 12785 : ProxyPort;
@@ -1527,6 +1539,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _config.Network.BypassProxyOnLocal = NetworkProxyBypassOnLocal;
         _config.Network.OutboundHttpVersion = NetworkHttpVersion;
         _config.Network.ConnectTimeoutSeconds = NormalizeConnectTimeoutSeconds(NetworkConnectTimeoutSeconds);
+        _config.Network.RetryEnabled = NetworkRetryEnabled;
+        _config.Network.MaxRetries = NormalizeMaxRetries(NetworkMaxRetries);
+        _config.Network.RetryBaseDelaySeconds = NormalizeRetryBaseDelaySeconds(NetworkRetryBaseDelaySeconds);
         _config.Ui.Language = string.IsNullOrWhiteSpace(UiLanguage) ? _i18n.DefaultLanguageCode : UiLanguage.Trim();
         _config.Ui.Theme = AppThemeService.Normalize(UiTheme);
         UiTheme = _config.Ui.Theme;
@@ -1555,6 +1570,16 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private static int NormalizeConnectTimeoutSeconds(int value)
     {
         return value <= 0 ? 30 : value;
+    }
+
+    private static int NormalizeMaxRetries(int value)
+    {
+        return Math.Clamp(value, 0, 5);
+    }
+
+    private static int NormalizeRetryBaseDelaySeconds(int value)
+    {
+        return Math.Clamp(value, 1, 10);
     }
 
     private void SyncStartupRegistrationFromConfig()
@@ -4139,6 +4164,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             NetworkProxyBypassOnLocal = _config.Network.BypassProxyOnLocal;
             NetworkHttpVersion = _config.Network.OutboundHttpVersion;
             NetworkConnectTimeoutSeconds = NormalizeConnectTimeoutSeconds(_config.Network.ConnectTimeoutSeconds);
+            NetworkRetryEnabled = _config.Network.RetryEnabled;
+            NetworkMaxRetries = NormalizeMaxRetries(_config.Network.MaxRetries);
+            NetworkRetryBaseDelaySeconds = NormalizeRetryBaseDelaySeconds(_config.Network.RetryBaseDelaySeconds);
             PreserveCodexAppAuth = _config.Proxy.PreserveCodexAppAuth;
             UseFakeCodexAppAuth = _config.Proxy.UseFakeCodexAppAuth;
             ManageCodexConfig = _config.Proxy.ManageCodexConfig;

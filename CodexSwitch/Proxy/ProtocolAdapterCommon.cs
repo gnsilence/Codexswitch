@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -46,8 +47,40 @@ public static class ProtocolAdapterCommon
 
     public static void Record(ProviderRequestContext context, UsageLogRecord record)
     {
+        if (!context.IsFinalRetryAttempt &&
+            record.StatusCode >= 400 &&
+            IsTransientStatusCode((HttpStatusCode)record.StatusCode))
+        {
+            return;
+        }
+
         context.UsageMeter.Record(record);
         context.UsageLogWriter.AppendBuffered(record);
+    }
+
+    public static ProviderAdapterResult RecordResponseAlreadyStartedFailure(
+        ProviderRequestContext context,
+        string requestModel,
+        bool stream,
+        Stopwatch stopwatch,
+        Exception exception)
+    {
+        context.MarkRetryFinalAttempt();
+        stopwatch.Stop();
+        Record(
+            context,
+            CreateRecord(
+                context,
+                requestModel,
+                stream,
+                StatusCodes.Status502BadGateway,
+                stopwatch.ElapsedMilliseconds,
+                default,
+                null,
+                exception.Message));
+        return ProviderAdapterResult.ResponseAlreadyStartedFailure(
+            StatusCodes.Status502BadGateway,
+            exception.Message);
     }
 
     public static void CopyContentHeaders(HttpResponseMessage upstreamResponse, HttpResponse downstreamResponse)
@@ -87,10 +120,28 @@ public static class ProtocolAdapterCommon
 
     public static bool IsTransientStatusCode(HttpStatusCode statusCode)
     {
-        var code = (int)statusCode;
         return statusCode is HttpStatusCode.RequestTimeout or
-            HttpStatusCode.TooManyRequests ||
-            code >= StatusCodes.Status500InternalServerError;
+            HttpStatusCode.TooManyRequests or
+            HttpStatusCode.InternalServerError or
+            HttpStatusCode.BadGateway or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout;
+    }
+
+    public static TimeSpan? GetRetryAfter(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter?.Delta is { } delta && delta > TimeSpan.Zero)
+            return delta;
+
+        if (retryAfter?.Date is { } date)
+        {
+            var remaining = date - DateTimeOffset.UtcNow;
+            if (remaining > TimeSpan.Zero)
+                return remaining;
+        }
+
+        return null;
     }
 
     public static bool IsTransientException(Exception exception, CancellationToken cancellationToken)

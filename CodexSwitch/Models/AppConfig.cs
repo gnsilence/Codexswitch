@@ -82,6 +82,12 @@ public sealed class NetworkSettings
     public OutboundHttpVersion OutboundHttpVersion { get; set; } = OutboundHttpVersion.Http2;
 
     public int ConnectTimeoutSeconds { get; set; } = 30;
+
+    public bool RetryEnabled { get; set; } = true;
+
+    public int MaxRetries { get; set; } = 2;
+
+    public int RetryBaseDelaySeconds { get; set; } = 1;
 }
 
 public enum OutboundProxyMode

@@ -84,7 +84,12 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
                 catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
                 {
                     return context.HttpContext.Response.HasStarted
-                        ? ProviderAdapterResult.ResponseAlreadyStartedFailure(StatusCodes.Status502BadGateway, ex.Message)
+                        ? ProtocolAdapterCommon.RecordResponseAlreadyStartedFailure(
+                            context,
+                            requestModel,
+                            isStream,
+                            stopwatch,
+                            ex)
                         : ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
                 }
             }
@@ -114,7 +119,10 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
             if (!upstreamResponse.IsSuccessStatusCode &&
                 ProtocolAdapterCommon.IsTransientStatusCode(upstreamResponse.StatusCode))
             {
-                return ProviderAdapterResult.RetryableFailureBeforeResponseStarted((int)upstreamResponse.StatusCode, responseBody);
+                return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                    (int)upstreamResponse.StatusCode,
+                    responseBody,
+                    ProtocolAdapterCommon.GetRetryAfter(upstreamResponse));
             }
 
             context.HttpContext.Response.StatusCode = (int)upstreamResponse.StatusCode;
@@ -210,7 +218,12 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
                 catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
                 {
                     return context.HttpContext.Response.HasStarted
-                        ? ProviderAdapterResult.ResponseAlreadyStartedFailure(StatusCodes.Status502BadGateway, ex.Message)
+                        ? ProtocolAdapterCommon.RecordResponseAlreadyStartedFailure(
+                            context,
+                            requestModel,
+                            isStream,
+                            stopwatch,
+                            ex)
                         : ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
                 }
             }
@@ -232,7 +245,10 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
                 Record(context, errorRecord);
 
                 if (ProtocolAdapterCommon.IsTransientStatusCode(upstreamResponse.StatusCode))
-                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted((int)upstreamResponse.StatusCode, responseBody);
+                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                        (int)upstreamResponse.StatusCode,
+                        responseBody,
+                        ProtocolAdapterCommon.GetRetryAfter(upstreamResponse));
 
                 context.HttpContext.Response.StatusCode = (int)upstreamResponse.StatusCode;
                 CopyContentHeaders(upstreamResponse, context.HttpContext.Response);
@@ -261,11 +277,14 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
                     null,
                     ex.Message);
                 Record(context, errorRecord);
-                await WriteJsonErrorAsync(
-                    context.HttpContext,
-                    HttpStatusCode.BadGateway,
-                    "OpenAI Responses upstream returned invalid JSON.",
-                    cancellationToken);
+                if (context.IsFinalRetryAttempt)
+                {
+                    await WriteJsonErrorAsync(
+                        context.HttpContext,
+                        HttpStatusCode.BadGateway,
+                        "OpenAI Responses upstream returned invalid JSON.",
+                        cancellationToken);
+                }
                 return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
             }
 
@@ -1202,6 +1221,8 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
         await using var stream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var dataBuilder = new StringBuilder();
+        var eventBuffer = new StringBuilder();
+        var outputDeltas = new List<string>();
         string? eventName = null;
         UsageTokens finalUsage = default;
         string? finalModel = null;
@@ -1210,9 +1231,13 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
         {
             var line = await reader.ReadLineAsync(cancellationToken);
             if (line is null)
+            {
+                if (eventBuffer.Length > 0)
+                    throw new IOException("Upstream SSE stream closed before a complete event.");
                 break;
+            }
 
-            await context.HttpContext.Response.WriteAsync(line + "\n", cancellationToken);
+            eventBuffer.Append(line).Append('\n');
 
             if (line.Length == 0)
             {
@@ -1223,6 +1248,11 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
                 }
 
                 dataBuilder.Clear();
+                await context.HttpContext.Response.WriteAsync(eventBuffer.ToString(), cancellationToken);
+                eventBuffer.Clear();
+                foreach (var outputDelta in outputDeltas)
+                    ProtocolAdapterCommon.ReportOutputActivity(context.HttpContext, eventName, outputDelta);
+                outputDeltas.Clear();
                 eventName = null;
                 await context.HttpContext.Response.Body.FlushAsync(cancellationToken);
                 continue;
@@ -1238,7 +1268,7 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
             {
                 var data = line[5..].TrimStart();
                 dataBuilder.AppendLine(data);
-                ProtocolAdapterCommon.ReportOutputActivity(context.HttpContext, eventName, data);
+                outputDeltas.Add(data);
             }
         }
 
@@ -1302,8 +1332,7 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
 
     private static void Record(ProviderRequestContext context, UsageLogRecord record)
     {
-        context.UsageMeter.Record(record);
-        context.UsageLogWriter.AppendBuffered(record);
+        ProtocolAdapterCommon.Record(context, record);
     }
 
     private static string? TruncateError(string? error)

@@ -766,6 +766,8 @@ public sealed class CodexConfigWriter
     {
         return !string.IsNullOrWhiteSpace(modelId) &&
             (modelId.StartsWith("gpt-6-astra", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("gpt-6-sol", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("gpt-6-luna", StringComparison.OrdinalIgnoreCase) ||
              modelId.StartsWith("gpt-5.6-sol", StringComparison.OrdinalIgnoreCase) ||
              modelId.StartsWith("gpt-5.6-terra", StringComparison.OrdinalIgnoreCase));
     }

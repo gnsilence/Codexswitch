@@ -512,14 +512,31 @@ public sealed class ProxyHostService : IAsyncDisposable
                     _priceCalculator,
                     _usageLogWriter);
 
-            var result = await invokeAdapter(adapter, context, httpContext.RequestAborted);
-            if (result.Kind == ProviderAdapterResultKind.Success)
-                return;
+            var maxRetries = UpstreamRetryPolicy.ResolveMaxRetries(_config.Network);
+            ProviderAdapterResult result;
+            for (var retryAttempt = 0; ; retryAttempt++)
+            {
+                context.SetRetryAttempt(retryAttempt, maxRetries);
+                result = await invokeAdapter(adapter, context, httpContext.RequestAborted);
+                if (result.Kind == ProviderAdapterResultKind.Success)
+                    return;
+
+                if (result.Kind != ProviderAdapterResultKind.RetryableFailureBeforeResponseStarted ||
+                    httpContext.Response.HasStarted ||
+                    retryAttempt >= maxRetries)
+                {
+                    break;
+                }
+
+                ResetResponseForRetry(httpContext.Response);
+                var delay = UpstreamRetryPolicy.CalculateDelay(
+                    _config.Network,
+                    retryAttempt + 1,
+                    result.RetryAfter);
+                await Task.Delay(delay, httpContext.RequestAborted);
+            }
 
             attempts.Add(FormatProviderAttempt(provider, result));
-
-            if (result.Kind == ProviderAdapterResultKind.RetryableFailureBeforeResponseStarted)
-                continue;
 
             if (result.Kind == ProviderAdapterResultKind.ResponseAlreadyStartedFailure ||
                 result.Kind == ProviderAdapterResultKind.NonRetryableFailure ||
@@ -530,6 +547,17 @@ public sealed class ProxyHostService : IAsyncDisposable
         }
 
         await WriteAllProvidersUnavailableAsync(httpContext, attempts);
+    }
+
+    private static void ResetResponseForRetry(HttpResponse response)
+    {
+        if (response.HasStarted)
+            return;
+
+        response.StatusCode = StatusCodes.Status200OK;
+        response.ContentType = null;
+        response.ContentLength = null;
+        response.Headers.Clear();
     }
 
     private static IReadOnlyList<ProviderRouteSelection> ResolveRouteCandidates(

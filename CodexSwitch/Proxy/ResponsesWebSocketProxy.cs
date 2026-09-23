@@ -13,6 +13,23 @@ namespace CodexSwitch.Proxy;
 
 internal sealed class ResponsesWebSocketProxy
 {
+    private enum WebSocketAttemptKind
+    {
+        Success,
+        Retryable,
+        ResponseStarted,
+        Fallback
+    }
+
+    private sealed record WebSocketAttemptResult(
+        WebSocketAttemptKind Kind,
+        TimeSpan? RetryAfter = null);
+
+    private sealed record HttpFallbackAttemptResult(
+        bool Succeeded,
+        bool Retryable,
+        TimeSpan? RetryAfter = null);
+
     private static readonly TimeSpan ConnectionLimit = TimeSpan.FromMinutes(60);
     private static readonly TimeSpan UpstreamKeepAlive = TimeSpan.FromSeconds(30);
     private static readonly string[] TransportOmitKeys =
@@ -265,27 +282,84 @@ internal sealed class ResponsesWebSocketProxy
         var fallbackKey = CreateHttpFallbackKey(context);
         if (_httpFallbackClient is not null && _httpFallbackProviders.ContainsKey(fallbackKey))
         {
-            await ProxyHttpFallbackAsync(context, clientSocket, requestModel, stopwatch, cancellationToken);
+            await ProxyHttpFallbackWithRetryAsync(context, clientSocket, requestModel, stopwatch, cancellationToken);
             return;
         }
 
+        var maxRetries = UpstreamRetryPolicy.ResolveMaxRetries(context.AppConfig.Network);
+        for (var retryAttempt = 0; ; retryAttempt++)
+        {
+            context.SetRetryAttempt(retryAttempt, maxRetries);
+            var result = await TryProxyResponseCreateOnceAsync(
+                context,
+                clientSocket,
+                requestModel,
+                payload,
+                stopwatch,
+                cancellationToken);
+            if (result.Kind == WebSocketAttemptKind.Success)
+                return;
+
+            if (result.Kind == WebSocketAttemptKind.Fallback)
+            {
+                await FallbackOrSendErrorAsync(
+                    clientSocket,
+                    context,
+                    requestModel,
+                    stopwatch,
+                    StatusCodes.Status502BadGateway,
+                    "upstream_websocket_not_supported",
+                    "The upstream does not support Responses WebSocket mode.",
+                    cancellationToken);
+                return;
+            }
+
+            if (result.Kind == WebSocketAttemptKind.ResponseStarted ||
+                retryAttempt >= maxRetries)
+            {
+                await FallbackOrSendErrorAsync(
+                    clientSocket,
+                    context,
+                    requestModel,
+                    stopwatch,
+                    StatusCodes.Status502BadGateway,
+                    "upstream_websocket_failed",
+                    "The upstream WebSocket failed after the configured retries.",
+                    cancellationToken);
+                return;
+            }
+
+            await Task.Delay(
+                UpstreamRetryPolicy.CalculateDelay(
+                    context.AppConfig.Network,
+                    retryAttempt + 1,
+                    result.RetryAfter),
+                cancellationToken);
+        }
+    }
+
+    private async Task<WebSocketAttemptResult> TryProxyResponseCreateOnceAsync(
+        ProviderRequestContext context,
+        WebSocket clientSocket,
+        string requestModel,
+        byte[] payload,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
         UpstreamConnection upstream;
         try
         {
             upstream = await EnsureUpstreamAsync(context, cancellationToken);
         }
-        catch (Exception ex) when (ex is WebSocketException or HttpRequestException or IOException)
+        catch (Exception ex) when (UpstreamRetryPolicy.IsUnsupportedWebSocketHandshake(ex))
         {
-            await FallbackOrSendErrorAsync(
-                clientSocket,
-                context,
-                requestModel,
-                stopwatch,
-                StatusCodes.Status502BadGateway,
-                "upstream_websocket_connect_failed",
-                ex.Message,
-                cancellationToken);
-            return;
+            await CloseUpstreamAsync();
+            return new WebSocketAttemptResult(WebSocketAttemptKind.Fallback);
+        }
+        catch (Exception ex) when (UpstreamRetryPolicy.ShouldRetryWebSocketException(ex, cancellationToken))
+        {
+            await CloseUpstreamAsync();
+            return new WebSocketAttemptResult(WebSocketAttemptKind.Retryable);
         }
 
         try
@@ -295,16 +369,7 @@ internal sealed class ResponsesWebSocketProxy
         catch (Exception ex) when (ex is WebSocketException or IOException)
         {
             await CloseUpstreamAsync();
-            await FallbackOrSendErrorAsync(
-                clientSocket,
-                context,
-                requestModel,
-                stopwatch,
-                StatusCodes.Status502BadGateway,
-                "upstream_websocket_send_failed",
-                ex.Message,
-                cancellationToken);
-            return;
+            return new WebSocketAttemptResult(WebSocketAttemptKind.Retryable);
         }
 
         UsageTokens finalUsage = default;
@@ -325,15 +390,7 @@ internal sealed class ResponsesWebSocketProxy
                 await CloseUpstreamAsync();
                 if (!forwardedUpstreamEvent)
                 {
-                    await FallbackOrSendErrorAsync(
-                        clientSocket,
-                        context,
-                        requestModel,
-                        stopwatch,
-                        StatusCodes.Status502BadGateway,
-                        "upstream_websocket_receive_failed",
-                        ex.Message,
-                        cancellationToken);
+                    return new WebSocketAttemptResult(WebSocketAttemptKind.Retryable);
                 }
                 else
                 {
@@ -349,7 +406,7 @@ internal sealed class ResponsesWebSocketProxy
                         null,
                         cancellationToken);
                 }
-                return;
+                return new WebSocketAttemptResult(WebSocketAttemptKind.ResponseStarted);
             }
 
             if (upstreamMessage is null)
@@ -357,15 +414,7 @@ internal sealed class ResponsesWebSocketProxy
                 await CloseUpstreamAsync();
                 if (!forwardedUpstreamEvent)
                 {
-                    await FallbackOrSendErrorAsync(
-                        clientSocket,
-                        context,
-                        requestModel,
-                        stopwatch,
-                        StatusCodes.Status502BadGateway,
-                        "upstream_websocket_closed",
-                        "Upstream websocket closed before a terminal response event.",
-                        cancellationToken);
+                    return new WebSocketAttemptResult(WebSocketAttemptKind.Retryable);
                 }
                 else
                 {
@@ -381,14 +430,30 @@ internal sealed class ResponsesWebSocketProxy
                         null,
                         cancellationToken);
                 }
-                return;
+                return new WebSocketAttemptResult(WebSocketAttemptKind.ResponseStarted);
+            }
+
+            var eventType = ResponsesUsageScanner.TryParseEventType(upstreamMessage, out var parsedEventType)
+                ? parsedEventType
+                : null;
+
+            if (!forwardedUpstreamEvent &&
+                IsTerminalEvent(eventType) &&
+                (string.Equals(eventType, "response.failed", StringComparison.Ordinal) ||
+                 string.Equals(eventType, "error", StringComparison.Ordinal)))
+            {
+                var errorStatus = ResponsesUsageScanner.TryParseErrorStatus(upstreamMessage);
+                if (errorStatus is { } status && ProtocolAdapterCommon.IsTransientStatusCode((HttpStatusCode)status))
+                {
+                    await CloseUpstreamAsync();
+                    return new WebSocketAttemptResult(
+                        WebSocketAttemptKind.Retryable,
+                        null);
+                }
             }
 
             await SendTextAsync(clientSocket, upstreamMessage, cancellationToken);
             forwardedUpstreamEvent = true;
-            var eventType = ResponsesUsageScanner.TryParseEventType(upstreamMessage, out var parsedEventType)
-                ? parsedEventType
-                : null;
             ProtocolAdapterCommon.ReportOutputActivity(context.HttpContext, eventType, upstreamMessage);
 
             if (!IsTerminalEvent(eventType))
@@ -422,6 +487,34 @@ internal sealed class ResponsesWebSocketProxy
                 finalUsage,
                 finalModel,
                 finalError));
+        return new WebSocketAttemptResult(WebSocketAttemptKind.Success);
+    }
+
+    private async Task ProxyHttpFallbackWithRetryAsync(
+        ProviderRequestContext context,
+        WebSocket clientSocket,
+        string requestModel,
+        Stopwatch stopwatch,
+        CancellationToken cancellationToken)
+    {
+        var maxRetries = UpstreamRetryPolicy.ResolveMaxRetries(context.AppConfig.Network);
+        for (var retryAttempt = 0; ; retryAttempt++)
+        {
+            context.SetRetryAttempt(retryAttempt, maxRetries);
+            var result = await ProxyHttpFallbackAsync(context, clientSocket, requestModel, stopwatch, cancellationToken);
+            if (result.Succeeded)
+                return;
+
+            if (!result.Retryable || retryAttempt >= maxRetries)
+                return;
+
+            await Task.Delay(
+                UpstreamRetryPolicy.CalculateDelay(
+                    context.AppConfig.Network,
+                    retryAttempt + 1,
+                    result.RetryAfter),
+                cancellationToken);
+        }
     }
 
     private async Task FallbackOrSendErrorAsync(
@@ -436,7 +529,7 @@ internal sealed class ResponsesWebSocketProxy
     {
         if (_httpFallbackClient is not null && context.RequestSnapshot is not null)
         {
-            await ProxyHttpFallbackAsync(context, clientSocket, requestModel, stopwatch, cancellationToken);
+            await ProxyHttpFallbackWithRetryAsync(context, clientSocket, requestModel, stopwatch, cancellationToken);
             return;
         }
 
@@ -453,7 +546,7 @@ internal sealed class ResponsesWebSocketProxy
             cancellationToken);
     }
 
-    private async Task<bool> ProxyHttpFallbackAsync(
+    private async Task<HttpFallbackAttemptResult> ProxyHttpFallbackAsync(
         ProviderRequestContext context,
         WebSocket clientSocket,
         string requestModel,
@@ -478,7 +571,7 @@ internal sealed class ResponsesWebSocketProxy
                 ex.Message,
                 "previous_response_id",
                 cancellationToken);
-            return false;
+            return new HttpFallbackAttemptResult(false, false);
         }
 
         HttpResponseMessage upstreamResponse;
@@ -496,51 +589,7 @@ internal sealed class ResponsesWebSocketProxy
         }
         catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
         {
-            await SendAndRecordErrorAsync(
-                clientSocket,
-                context,
-                requestModel,
-                stopwatch,
-                StatusCodes.Status502BadGateway,
-                "server_error",
-                "upstream_http_fallback_failed",
-                ex.Message,
-                null,
-                cancellationToken);
-            return false;
-        }
-
-        using (upstreamResponse)
-        {
-            if (!upstreamResponse.IsSuccessStatusCode)
-            {
-                var error = await upstreamResponse.Content.ReadAsStringAsync(cancellationToken);
-                await SendAndRecordErrorAsync(
-                    clientSocket,
-                    context,
-                    requestModel,
-                    stopwatch,
-                    (int)upstreamResponse.StatusCode,
-                    "server_error",
-                    "upstream_http_fallback_failed",
-                    string.IsNullOrWhiteSpace(error) ? upstreamResponse.ReasonPhrase ?? "HTTP fallback failed." : error,
-                    null,
-                    cancellationToken);
-                return false;
-            }
-
-            _httpFallbackProviders.TryAdd(CreateHttpFallbackKey(context), 0);
-            try
-            {
-                return await ProxyHttpFallbackStreamAsync(
-                    context,
-                    clientSocket,
-                    upstreamResponse,
-                    requestModel,
-                    stopwatch,
-                    cancellationToken);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            if (context.IsFinalRetryAttempt)
             {
                 await SendAndRecordErrorAsync(
                     clientSocket,
@@ -553,8 +602,46 @@ internal sealed class ResponsesWebSocketProxy
                     ex.Message,
                     null,
                     cancellationToken);
-                return false;
             }
+            return new HttpFallbackAttemptResult(false, true);
+        }
+
+        using (upstreamResponse)
+        {
+            if (!upstreamResponse.IsSuccessStatusCode)
+            {
+                var error = await upstreamResponse.Content.ReadAsStringAsync(cancellationToken);
+                var retryable = ProtocolAdapterCommon.IsTransientStatusCode(upstreamResponse.StatusCode);
+                if (retryable && !context.IsFinalRetryAttempt)
+                {
+                    return new HttpFallbackAttemptResult(
+                        false,
+                        true,
+                        ProtocolAdapterCommon.GetRetryAfter(upstreamResponse));
+                }
+
+                await SendAndRecordErrorAsync(
+                    clientSocket,
+                    context,
+                    requestModel,
+                    stopwatch,
+                    (int)upstreamResponse.StatusCode,
+                    "server_error",
+                    "upstream_http_fallback_failed",
+                    string.IsNullOrWhiteSpace(error) ? upstreamResponse.ReasonPhrase ?? "HTTP fallback failed." : error,
+                    null,
+                    cancellationToken);
+                return new HttpFallbackAttemptResult(false, retryable);
+            }
+
+            _httpFallbackProviders.TryAdd(CreateHttpFallbackKey(context), 0);
+            return await ProxyHttpFallbackStreamAsync(
+                context,
+                clientSocket,
+                upstreamResponse,
+                requestModel,
+                stopwatch,
+                cancellationToken);
         }
     }
 
@@ -583,7 +670,7 @@ internal sealed class ResponsesWebSocketProxy
             cancellationToken);
     }
 
-    private async Task<bool> ProxyHttpFallbackStreamAsync(
+    private async Task<HttpFallbackAttemptResult> ProxyHttpFallbackStreamAsync(
         ProviderRequestContext context,
         WebSocket clientSocket,
         HttpResponseMessage upstreamResponse,
@@ -591,7 +678,32 @@ internal sealed class ResponsesWebSocketProxy
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
-        await using var stream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
+        Stream stream;
+        try
+        {
+            stream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
+        {
+            if (context.IsFinalRetryAttempt)
+            {
+                await SendAndRecordErrorAsync(
+                    clientSocket,
+                    context,
+                    requestModel,
+                    stopwatch,
+                    StatusCodes.Status502BadGateway,
+                    "server_error",
+                    "upstream_http_fallback_failed",
+                    ex.Message,
+                    null,
+                    cancellationToken);
+            }
+            return new HttpFallbackAttemptResult(false, true);
+        }
+
+        await using (stream)
+        {
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var dataBuilder = new StringBuilder();
         string? eventName = null;
@@ -599,11 +711,121 @@ internal sealed class ResponsesWebSocketProxy
         string? finalModel = null;
         string? finalError = null;
         var finalStatus = StatusCodes.Status200OK;
+        var forwardedEvent = false;
 
         while (true)
         {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line is not null && line.Length > 0)
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(cancellationToken);
+            }
+            catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
+            {
+                if (!forwardedEvent)
+                {
+                    if (context.IsFinalRetryAttempt)
+                    {
+                        await SendAndRecordErrorAsync(
+                            clientSocket,
+                            context,
+                            requestModel,
+                            stopwatch,
+                            StatusCodes.Status502BadGateway,
+                            "server_error",
+                            "upstream_http_fallback_failed",
+                            ex.Message,
+                            null,
+                            cancellationToken);
+                    }
+                    return new HttpFallbackAttemptResult(false, true);
+                }
+
+                await SendAndRecordErrorAsync(
+                    clientSocket,
+                    context,
+                    requestModel,
+                    stopwatch,
+                    StatusCodes.Status502BadGateway,
+                    "server_error",
+                    "upstream_http_fallback_failed",
+                    ex.Message,
+                    null,
+                    cancellationToken);
+                return new HttpFallbackAttemptResult(false, false);
+            }
+
+            if (line is null)
+            {
+                if (dataBuilder.Length > 0 || !string.IsNullOrWhiteSpace(eventName))
+                {
+                    if (!forwardedEvent)
+                    {
+                        if (context.IsFinalRetryAttempt)
+                        {
+                            await SendAndRecordErrorAsync(
+                                clientSocket,
+                                context,
+                                requestModel,
+                                stopwatch,
+                                StatusCodes.Status502BadGateway,
+                                "server_error",
+                                "upstream_http_fallback_failed",
+                                "Upstream HTTP stream closed before a complete event.",
+                                null,
+                                cancellationToken);
+                        }
+                        return new HttpFallbackAttemptResult(false, true);
+                    }
+
+                    await SendAndRecordErrorAsync(
+                        clientSocket,
+                        context,
+                        requestModel,
+                        stopwatch,
+                        StatusCodes.Status502BadGateway,
+                        "server_error",
+                        "upstream_http_fallback_failed",
+                        "Upstream HTTP stream closed before a complete event.",
+                        null,
+                        cancellationToken);
+                    return new HttpFallbackAttemptResult(false, false);
+                }
+
+                if (!forwardedEvent)
+                {
+                    if (context.IsFinalRetryAttempt)
+                    {
+                        await SendAndRecordErrorAsync(
+                            clientSocket,
+                            context,
+                            requestModel,
+                            stopwatch,
+                            StatusCodes.Status502BadGateway,
+                            "server_error",
+                            "upstream_http_fallback_closed",
+                            "Upstream HTTP stream closed before a terminal response event.",
+                            null,
+                            cancellationToken);
+                    }
+                    return new HttpFallbackAttemptResult(false, true);
+                }
+
+                await SendAndRecordErrorAsync(
+                    clientSocket,
+                    context,
+                    requestModel,
+                    stopwatch,
+                    StatusCodes.Status502BadGateway,
+                    "server_error",
+                    "upstream_http_fallback_closed",
+                    "Upstream HTTP stream closed before a terminal response event.",
+                    null,
+                    cancellationToken);
+                return new HttpFallbackAttemptResult(false, false);
+            }
+
+            if (line.Length > 0)
             {
                 if (line.StartsWith("event:", StringComparison.Ordinal))
                 {
@@ -628,6 +850,32 @@ internal sealed class ResponsesWebSocketProxy
                         ? eventType
                         : eventName;
 
+                    if (!forwardedEvent &&
+                        IsTerminalEvent(parsedEventType) &&
+                        (string.Equals(parsedEventType, "response.failed", StringComparison.Ordinal) ||
+                         string.Equals(parsedEventType, "error", StringComparison.Ordinal)) &&
+                        ResponsesUsageScanner.TryParseErrorStatus(message) is { } errorStatus &&
+                        ProtocolAdapterCommon.IsTransientStatusCode((HttpStatusCode)errorStatus))
+                    {
+                        if (context.IsFinalRetryAttempt)
+                        {
+                            await SendTextAsync(clientSocket, message, cancellationToken);
+                            stopwatch.Stop();
+                            ProtocolAdapterCommon.Record(
+                                context,
+                                ProtocolAdapterCommon.CreateRecord(
+                                    context,
+                                    requestModel,
+                                    stream: true,
+                                    errorStatus,
+                                    stopwatch.ElapsedMilliseconds,
+                                    default,
+                                    null,
+                                    ResponsesUsageScanner.ExtractErrorMessage(message)));
+                        }
+                        return new HttpFallbackAttemptResult(false, true);
+                    }
+
                     if (IsTerminalEvent(parsedEventType))
                     {
                         if (ResponsesUsageScanner.TryParseResponseUsage(message, out var usage, out var model))
@@ -647,6 +895,7 @@ internal sealed class ResponsesWebSocketProxy
                     }
 
                     await SendTextAsync(clientSocket, message, cancellationToken);
+                    forwardedEvent = true;
                     ProtocolAdapterCommon.ReportOutputActivity(context.HttpContext, parsedEventType, message);
 
                     if (IsTerminalEvent(parsedEventType))
@@ -663,28 +912,14 @@ internal sealed class ResponsesWebSocketProxy
                                 finalUsage,
                                 finalModel,
                                 finalError));
-                        return true;
+                        return new HttpFallbackAttemptResult(true, false);
                     }
                 }
             }
 
             eventName = null;
-            if (line is null)
-            {
-                await SendAndRecordErrorAsync(
-                    clientSocket,
-                    context,
-                    requestModel,
-                    stopwatch,
-                    StatusCodes.Status502BadGateway,
-                    "server_error",
-                    "upstream_http_fallback_closed",
-                    "Upstream HTTP stream closed before a terminal response event.",
-                    null,
-                    cancellationToken);
-                return false;
-            }
         }
+    }
     }
 
     private static byte[] BuildHttpFallbackPayload(ProviderRequestContext context)
@@ -887,6 +1122,7 @@ internal sealed class ResponsesWebSocketProxy
         string? param,
         CancellationToken cancellationToken)
     {
+        context.MarkRetryFinalAttempt();
         await SendErrorAsync(clientSocket, statusCode, errorType, errorCode, message, param, cancellationToken);
         stopwatch.Stop();
         ProtocolAdapterCommon.Record(

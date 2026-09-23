@@ -5,7 +5,7 @@ namespace CodexSwitch.Services;
 
 public static class BuiltInModelCatalog
 {
-    public const string PricingSchemaVersion = "1.6";
+    public const string PricingSchemaVersion = "1.7";
     public const long OpenAiLongContextThresholdTokens = 272_000;
     public const long XiaomiLongContextThresholdTokens = 256_000;
 
@@ -14,6 +14,8 @@ public static class BuiltInModelCatalog
     public static IReadOnlyList<ProviderTemplateModel> RoutinAiModels { get; } =
     [
         OpenAiResponsesRoute("gpt-6-astra", "GPT-6 Astra", serviceTier: "priority", fastMode: true),
+        OpenAiResponsesRoute("gpt-6-sol", "GPT-6 Sol", serviceTier: "priority", fastMode: true),
+        OpenAiResponsesRoute("gpt-6-luna", "GPT-6 Luna", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-5.6-sol", "GPT-5.6 Sol", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-5.6-terra", "GPT-5.6 Terra", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-5.6-luna", "GPT-5.6 Luna", serviceTier: "priority", fastMode: true),
@@ -29,6 +31,8 @@ public static class BuiltInModelCatalog
     public static IReadOnlyList<ProviderTemplateModel> OpenAiOfficialModels { get; } =
     [
         OpenAiResponsesRoute("gpt-6-astra", "GPT-6 Astra"),
+        OpenAiResponsesRoute("gpt-6-sol", "GPT-6 Sol"),
+        OpenAiResponsesRoute("gpt-6-luna", "GPT-6 Luna"),
         OpenAiResponsesRoute("gpt-5.6-sol", "GPT-5.6 Sol"),
         OpenAiResponsesRoute("gpt-5.6-terra", "GPT-5.6 Terra"),
         OpenAiResponsesRoute("gpt-5.6-luna", "GPT-5.6 Luna"),
@@ -115,6 +119,26 @@ public static class BuiltInModelCatalog
                 Tiered(OpenAiLongContextThresholdTokens, 12.50m, 25m),
                 Tiered(OpenAiLongContextThresholdTokens, 50m, 75m),
                 aliases: ["gpt-6-astra*"],
+                contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
+            CreateRule(
+                "gpt-6-sol",
+                "GPT-6 Sol",
+                "openai",
+                Tiered(OpenAiLongContextThresholdTokens, 2m, 4m),
+                Tiered(OpenAiLongContextThresholdTokens, 0.20m, 0.40m),
+                Tiered(OpenAiLongContextThresholdTokens, 2.50m, 5m),
+                Tiered(OpenAiLongContextThresholdTokens, 10m, 15m),
+                aliases: ["gpt-6-sol*"],
+                contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
+            CreateRule(
+                "gpt-6-luna",
+                "GPT-6 Luna",
+                "openai",
+                Tiered(OpenAiLongContextThresholdTokens, 0.10m, 0.20m),
+                Tiered(OpenAiLongContextThresholdTokens, 0.01m, 0.02m),
+                Tiered(OpenAiLongContextThresholdTokens, 0.125m, 0.25m),
+                Tiered(OpenAiLongContextThresholdTokens, 0.50m, 0.75m),
+                aliases: ["gpt-6-luna*"],
                 contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
             CreateRule(
                 "gpt-5.6-sol",

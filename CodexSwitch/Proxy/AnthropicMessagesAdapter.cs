@@ -114,7 +114,12 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
                 catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
                 {
                     return context.HttpContext.Response.HasStarted
-                        ? ProviderAdapterResult.ResponseAlreadyStartedFailure(StatusCodes.Status502BadGateway, ex.Message)
+                        ? ProtocolAdapterCommon.RecordResponseAlreadyStartedFailure(
+                            context,
+                            requestModel,
+                            isStream,
+                            stopwatch,
+                            ex)
                         : ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
                 }
             }
@@ -136,7 +141,10 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
                 ProtocolAdapterCommon.Record(context, errorRecord);
 
                 if (ProtocolAdapterCommon.IsTransientStatusCode(upstreamResponse.StatusCode))
-                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted((int)upstreamResponse.StatusCode, responseBody);
+                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                        (int)upstreamResponse.StatusCode,
+                        responseBody,
+                        ProtocolAdapterCommon.GetRetryAfter(upstreamResponse));
 
                 context.HttpContext.Response.StatusCode = (int)upstreamResponse.StatusCode;
                 ProtocolAdapterCommon.CopyContentHeaders(upstreamResponse, context.HttpContext.Response);
@@ -165,11 +173,14 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
                     null,
                     ex.Message);
                 ProtocolAdapterCommon.Record(context, errorRecord);
-                await ProtocolAdapterCommon.WriteJsonErrorAsync(
-                    context.HttpContext,
-                    HttpStatusCode.BadGateway,
-                    "Anthropic Messages upstream returned invalid JSON.",
-                    cancellationToken);
+                if (context.IsFinalRetryAttempt)
+                {
+                    await ProtocolAdapterCommon.WriteJsonErrorAsync(
+                        context.HttpContext,
+                        HttpStatusCode.BadGateway,
+                        "Anthropic Messages upstream returned invalid JSON.",
+                        cancellationToken);
+                }
                 return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
             }
 
@@ -250,7 +261,12 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
                 catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
                 {
                     return context.HttpContext.Response.HasStarted
-                        ? ProviderAdapterResult.ResponseAlreadyStartedFailure(StatusCodes.Status502BadGateway, ex.Message)
+                        ? ProtocolAdapterCommon.RecordResponseAlreadyStartedFailure(
+                            context,
+                            requestModel,
+                            isStream,
+                            stopwatch,
+                            ex)
                         : ProviderAdapterResult.RetryableFailureBeforeResponseStarted(StatusCodes.Status502BadGateway, ex.Message);
                 }
             }
@@ -286,7 +302,10 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
             if (!upstreamResponse.IsSuccessStatusCode &&
                 ProtocolAdapterCommon.IsTransientStatusCode(upstreamResponse.StatusCode))
             {
-                return ProviderAdapterResult.RetryableFailureBeforeResponseStarted((int)upstreamResponse.StatusCode, responseBody);
+                return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                    (int)upstreamResponse.StatusCode,
+                    responseBody,
+                    ProtocolAdapterCommon.GetRetryAfter(upstreamResponse));
             }
 
             context.HttpContext.Response.StatusCode = (int)upstreamResponse.StatusCode;
@@ -2246,11 +2265,7 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
         CancellationToken cancellationToken)
     {
         var state = new AnthropicStreamingState();
-        await ProtocolAdapterCommon.WriteSseEventAsync(
-            context.HttpContext,
-            "response.created",
-            BuildCreatedEventJson(requestData, state),
-            cancellationToken);
+        var responseCreated = false;
 
         await using var stream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream, Encoding.UTF8);
@@ -2262,13 +2277,26 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
         {
             var line = await reader.ReadLineAsync(cancellationToken);
             if (line is null)
+            {
+                if (!string.IsNullOrWhiteSpace(currentEvent) || dataBuilder.Length > 0)
+                    throw new IOException("Upstream SSE stream closed before a complete event.");
                 break;
+            }
 
             if (line.Length == 0)
             {
                 if (!string.IsNullOrWhiteSpace(currentEvent) && dataBuilder.Length > 0)
                 {
                     using var document = JsonDocument.Parse(dataBuilder.ToString());
+                    if (!responseCreated)
+                    {
+                        await ProtocolAdapterCommon.WriteSseEventAsync(
+                            context.HttpContext,
+                            "response.created",
+                            BuildCreatedEventJson(requestData, state),
+                            cancellationToken);
+                        responseCreated = true;
+                    }
                     ProcessAnthropicStreamEvent(context, state, document.RootElement, currentEvent, cancellationToken);
                 }
 
@@ -2285,6 +2313,15 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
 
             if (line.StartsWith("data:", StringComparison.Ordinal))
                 dataBuilder.AppendLine(line[5..].TrimStart());
+        }
+
+        if (!responseCreated)
+        {
+            await ProtocolAdapterCommon.WriteSseEventAsync(
+                context.HttpContext,
+                "response.created",
+                BuildCreatedEventJson(requestData, state),
+                cancellationToken);
         }
 
         FinalizeAnthropicStreamOutput(state);

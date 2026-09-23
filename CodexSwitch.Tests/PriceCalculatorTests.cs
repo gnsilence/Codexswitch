@@ -98,6 +98,45 @@ public sealed class PriceCalculatorTests
     }
 
     [Fact]
+    public void Calculate_Gpt6SolAndLuna_UsesOfficialShortAndLongContextRates()
+    {
+        var calculator = new PriceCalculator(new ModelPricingCatalog
+        {
+            Models = BuiltInModelCatalog.CreatePricingRules()
+        });
+        var shortUsage = new UsageTokens(100_000, 50_000, 50_000, 10_000, 0);
+        var longUsage = new UsageTokens(300_000, 50_000, 25_000, 10_000, 0);
+
+        var solShort = calculator.Calculate("gpt-6-sol", shortUsage, new ProviderCostSettings());
+        Assert.Equal(0.20m, solShort.InputCost);
+        Assert.Equal(0.01m, solShort.CachedInputCost);
+        Assert.Equal(0.125m, solShort.CacheCreationInputCost);
+        Assert.Equal(0.10m, solShort.OutputCost);
+        Assert.Equal(0.435m, solShort.Total);
+
+        var solLong = calculator.Calculate("gpt-6-sol-2026-09-22", longUsage, new ProviderCostSettings());
+        Assert.Equal(1.20m, solLong.InputCost);
+        Assert.Equal(0.02m, solLong.CachedInputCost);
+        Assert.Equal(0.125m, solLong.CacheCreationInputCost);
+        Assert.Equal(0.15m, solLong.OutputCost);
+        Assert.Equal(1.495m, solLong.Total);
+
+        var lunaShort = calculator.Calculate("gpt-6-luna", shortUsage, new ProviderCostSettings());
+        Assert.Equal(0.01m, lunaShort.InputCost);
+        Assert.Equal(0.0005m, lunaShort.CachedInputCost);
+        Assert.Equal(0.00625m, lunaShort.CacheCreationInputCost);
+        Assert.Equal(0.005m, lunaShort.OutputCost);
+        Assert.Equal(0.02175m, lunaShort.Total);
+
+        var lunaLong = calculator.Calculate("gpt-6-luna-2026-09-22", longUsage, new ProviderCostSettings());
+        Assert.Equal(0.06m, lunaLong.InputCost);
+        Assert.Equal(0.001m, lunaLong.CachedInputCost);
+        Assert.Equal(0.00625m, lunaLong.CacheCreationInputCost);
+        Assert.Equal(0.0075m, lunaLong.OutputCost);
+        Assert.Equal(0.07475m, lunaLong.Total);
+    }
+
+    [Fact]
     public void Calculate_AppliesCurrentProviderBillingMultiplierToOfficialRate()
     {
         var rule = Assert.Single(
