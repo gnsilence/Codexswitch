@@ -98,7 +98,10 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
             UsageTokens usage = default;
             string? responseModel = null;
             if (upstreamResponse.IsSuccessStatusCode)
-                ResponsesUsageScanner.TryParseResponseUsage(responseBytes, out usage, out responseModel);
+            {
+                ResponsesUsageScanner.TryParseResponseUsage(responseBytes, out usage, out responseModel, out var serviceTier);
+                context.ResponseServiceTier = serviceTier;
+            }
 
             var responseBody = upstreamResponse.IsSuccessStatusCode
                 ? null
@@ -262,6 +265,7 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
             try
             {
                 using var document = JsonDocument.Parse(responseBody);
+                context.CaptureResponseServiceTier(document.RootElement);
                 builtResponse = BuildMessagesAnthropicPayload(requestModel, document.RootElement);
             }
             catch (JsonException ex)
@@ -589,6 +593,7 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
                         if (!string.Equals(data, "[DONE]", StringComparison.Ordinal))
                         {
                             using var document = JsonDocument.Parse(data);
+                            context.CaptureResponseServiceTier(document.RootElement);
                             await ProcessResponsesStreamEventAsync(
                                 context.HttpContext,
                                 state,
@@ -619,6 +624,7 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
                 if (!string.Equals(data, "[DONE]", StringComparison.Ordinal))
                 {
                     using var document = JsonDocument.Parse(data);
+                    context.CaptureResponseServiceTier(document.RootElement);
                     await ProcessResponsesStreamEventAsync(
                         context.HttpContext,
                         state,
@@ -1241,10 +1247,12 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
 
             if (line.Length == 0)
             {
-                if (ResponsesUsageParser.TryParseCompletedSse(eventName, dataBuilder, out var usage, out var model))
+                if (ResponsesUsageScanner.TryParseCompletedSse(
+                    eventName, dataBuilder, out var usage, out var model, out var serviceTier))
                 {
                     finalUsage = usage;
                     finalModel = model;
+                    context.ResponseServiceTier = serviceTier;
                 }
 
                 dataBuilder.Clear();
@@ -1310,7 +1318,8 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
         string? error)
     {
         var billedModel = string.IsNullOrWhiteSpace(responseModel) ? requestModel : responseModel;
-        var cost = context.PriceCalculator.Calculate(billedModel, usage, context.CostSettings);
+        var serviceTier = context.ResolveBillingServiceTier();
+        var cost = context.PriceCalculator.Calculate(billedModel, usage, context.CostSettings, serviceTier);
         return new UsageLogRecord
         {
             Timestamp = DateTimeOffset.UtcNow,
@@ -1321,6 +1330,7 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
             BilledModel = billedModel,
             Stream = stream,
             FastMode = context.CostSettings.FastMode,
+            ServiceTier = serviceTier,
             Usage = usage,
             CostMultiplier = cost.Multiplier,
             EstimatedCost = cost.Total,

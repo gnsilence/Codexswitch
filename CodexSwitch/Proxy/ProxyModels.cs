@@ -57,6 +57,8 @@ public sealed class UsageLogRecord
 
     public bool FastMode { get; set; }
 
+    public string? ServiceTier { get; set; }
+
     public UsageTokens Usage { get; set; }
 
     public decimal CostMultiplier { get; set; } = 1m;

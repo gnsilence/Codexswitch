@@ -9,13 +9,15 @@ public sealed class PriceCalculator
         _catalog = catalog;
     }
 
-    public CostBreakdown Calculate(string model, UsageTokens usage, ProviderCostSettings settings)
+    public CostBreakdown Calculate(
+        string model, UsageTokens usage, ProviderCostSettings settings, string? serviceTier = null)
     {
         var rule = FindRule(model);
         if (rule is null)
             return new CostBreakdown(0m, 0m, 0m, settings.Multiplier);
 
         var multiplier = settings.Multiplier;
+        var rateMultiplier = ResolveServiceTierMultiplier(rule, settings.FastMode, serviceTier);
         var cacheCreationInput1HourTokens = Math.Min(
             usage.CacheCreationInputTokens,
             Math.Max(0, usage.CacheCreationInput1HourTokens));
@@ -31,21 +33,27 @@ public sealed class PriceCalculator
             var totalInput = usage.InputTokens + usage.CachedInputTokens + usage.CacheCreationInputTokens;
             var tierIndex = totalInput > threshold ? 1 : 0;
             return new CostBreakdown(
-                CalculateContextCost(usage.InputTokens, rule.Input, tierIndex),
-                CalculateContextCost(usage.CachedInputTokens, rule.CachedInput, tierIndex),
-                CalculateContextCost(cacheCreationInput5MinuteTokens, rule.CacheCreationInput, tierIndex) +
-                    CalculateContextCost(cacheCreationInput1HourTokens, cacheCreationInput1HourTable, tierIndex),
-                CalculateContextCost(usage.OutputTokens, rule.Output, tierIndex),
+                CalculateContextCost(usage.InputTokens, rule.Input, tierIndex) * rateMultiplier,
+                CalculateContextCost(usage.CachedInputTokens, rule.CachedInput, tierIndex) * rateMultiplier,
+                (CalculateContextCost(cacheCreationInput5MinuteTokens, rule.CacheCreationInput, tierIndex) +
+                    CalculateContextCost(cacheCreationInput1HourTokens, cacheCreationInput1HourTable, tierIndex)) * rateMultiplier,
+                CalculateContextCost(usage.OutputTokens, rule.Output, tierIndex) * rateMultiplier,
                 multiplier);
         }
 
         return new CostBreakdown(
-            CalculateTieredCost(usage.InputTokens, rule.Input),
-            CalculateTieredCost(usage.CachedInputTokens, rule.CachedInput),
-            CalculateTieredCost(cacheCreationInput5MinuteTokens, rule.CacheCreationInput) +
-                CalculateTieredCost(cacheCreationInput1HourTokens, cacheCreationInput1HourTable),
-            CalculateTieredCost(usage.OutputTokens, rule.Output),
+            CalculateTieredCost(usage.InputTokens, rule.Input) * rateMultiplier,
+            CalculateTieredCost(usage.CachedInputTokens, rule.CachedInput) * rateMultiplier,
+            (CalculateTieredCost(cacheCreationInput5MinuteTokens, rule.CacheCreationInput) +
+                CalculateTieredCost(cacheCreationInput1HourTokens, cacheCreationInput1HourTable)) * rateMultiplier,
+            CalculateTieredCost(usage.OutputTokens, rule.Output) * rateMultiplier,
             multiplier);
+    }
+
+    public static decimal ResolveServiceTierMultiplier(ModelPricingRule rule, bool fastMode, string? serviceTier = null)
+    {
+        var tier = serviceTier?.Trim().ToLowerInvariant() ?? (fastMode ? "priority" : "default");
+        return rule.ServiceTierMultipliers.TryGetValue(tier, out var multiplier) ? multiplier : 1m;
     }
 
     private ModelPricingRule? FindRule(string model)

@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.0.8] - 2026-09-30
+
+### Added
+
+- Added GPT-6.1 Sol to built-in OpenAI, AIOSS, and RoutinAI provider model catalogs, with a one-time upgrade that preserves existing routes and default-model selections.
+- Added GPT-6.1 Sol short- and long-context pricing and Standard, Fast, Flex, and Batch rate rules. Batch pricing does not submit batch jobs.
+- Added GPT-6.1 Sol `max` reasoning support to the managed Codex model catalog, preserving the separate ordinary and 1M context modes.
+
+### Changed
+
+- Made GPT-6.1 Sol model prices and usage estimates service-tier-aware while retaining existing pricing behavior for other models.
+- Recorded upstream service tiers in usage logs, with Chinese, English, and Japanese pricing hints.
+
+### Fixed
+
+- Applied configured service tiers to Responses requests even when the client omits `service_tier`.
+- Used the upstream-reported service tier when estimating cost, avoiding Fast overcharges when the response uses Standard pricing.
+
 ## [v0.0.7] - 2026-09-23
 
 ### Added

@@ -103,6 +103,33 @@ public sealed class ProviderRequestContext
 
     public UsageLogWriter UsageLogWriter { get; }
 
+    public string? ResponseServiceTier { get; set; }
+
+    public void CaptureResponseServiceTier(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+            return;
+        if (root.TryGetProperty("response", out var response) && response.ValueKind == JsonValueKind.Object)
+            root = response;
+        ResponseServiceTier = TryGetString(root, "service_tier") ?? ResponseServiceTier;
+    }
+
+    public string? ResolveBillingServiceTier()
+    {
+        if (!string.IsNullOrWhiteSpace(ResponseServiceTier))
+            return ResponseServiceTier;
+        if (!string.IsNullOrWhiteSpace(Model?.ServiceTier))
+            return Model.ServiceTier;
+        if (!string.IsNullOrWhiteSpace(Provider.ServiceTier))
+            return Provider.ServiceTier;
+        if (CostSettings.FastMode)
+            return "priority";
+
+        return RequestSnapshot is not null
+            ? RequestSnapshot.ServiceTier
+            : TryGetString(RequestRoot, "service_tier");
+    }
+
     public int RetryAttempt { get; private set; }
 
     public int MaxRetryAttempts { get; private set; }
@@ -111,6 +138,7 @@ public sealed class ProviderRequestContext
 
     public void SetRetryAttempt(int retryAttempt, int maxRetryAttempts)
     {
+        ResponseServiceTier = null;
         RetryAttempt = Math.Max(0, retryAttempt);
         MaxRetryAttempts = Math.Max(0, maxRetryAttempts);
     }

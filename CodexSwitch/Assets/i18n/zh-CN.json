@@ -367,6 +367,8 @@
     "models.price.fast": "Fast",
     "models.price.multiplier": "multiplier",
     "models.price.official": "官方 {0}",
+    "models.price.serviceTier": "计费模式：{0}",
+    "models.price.serviceTierMultipliers": "相对于 Standard 的费率倍率：{0}。超过 272,000 输入 token 时整次请求使用长上下文费率。Batch 仅表示计费规则，不会自动提交批处理任务。",
     "models.edit": "编辑模型",
     "models.delete": "删除模型",
     "providerDialog.addTitle": "添加提供商",

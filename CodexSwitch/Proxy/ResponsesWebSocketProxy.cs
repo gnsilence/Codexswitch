@@ -459,10 +459,12 @@ internal sealed class ResponsesWebSocketProxy
             if (!IsTerminalEvent(eventType))
                 continue;
 
-            if (ResponsesUsageScanner.TryParseResponseUsage(upstreamMessage, out var usage, out var model))
+            if (ResponsesUsageScanner.TryParseResponseUsage(
+                upstreamMessage, out var usage, out var model, out var serviceTier))
             {
                 finalUsage = usage;
                 finalModel = model;
+                context.ResponseServiceTier = serviceTier;
             }
 
             if (string.Equals(eventType, "response.failed", StringComparison.Ordinal) ||
@@ -878,10 +880,12 @@ internal sealed class ResponsesWebSocketProxy
 
                     if (IsTerminalEvent(parsedEventType))
                     {
-                        if (ResponsesUsageScanner.TryParseResponseUsage(message, out var usage, out var model))
+                        if (ResponsesUsageScanner.TryParseResponseUsage(
+                            message, out var usage, out var model, out var serviceTier))
                         {
                             finalUsage = usage;
                             finalModel = model;
+                            context.ResponseServiceTier = serviceTier;
                         }
 
                         if (string.Equals(parsedEventType, "response.failed", StringComparison.Ordinal) ||

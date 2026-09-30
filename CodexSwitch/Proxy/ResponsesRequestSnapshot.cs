@@ -10,6 +10,7 @@ public sealed class ResponsesRequestSnapshot : IDisposable
         byte[] body,
         string? requestModel,
         bool stream,
+        string? serviceTier,
         string? previousResponseId,
         string? eventType,
         bool store,
@@ -18,6 +19,7 @@ public sealed class ResponsesRequestSnapshot : IDisposable
         BodyBytes = body;
         RequestModel = requestModel;
         Stream = stream;
+        ServiceTier = serviceTier;
         PreviousResponseId = previousResponseId;
         EventType = eventType;
         Store = store;
@@ -31,6 +33,8 @@ public sealed class ResponsesRequestSnapshot : IDisposable
     public string? RequestModel { get; }
 
     public bool Stream { get; }
+
+    public string? ServiceTier { get; }
 
     public string? PreviousResponseId { get; }
 
@@ -72,6 +76,7 @@ public sealed class ResponsesRequestSnapshot : IDisposable
             body,
             metadata.RequestModel,
             metadata.Stream,
+            metadata.ServiceTier,
             metadata.PreviousResponseId,
             metadata.EventType,
             metadata.Store,
@@ -104,6 +109,7 @@ public sealed class ResponsesRequestSnapshot : IDisposable
         string? requestModel = null;
         string? previousResponseId = null;
         string? eventType = null;
+        string? serviceTier = null;
         var stream = false;
         var store = true;
 
@@ -131,6 +137,15 @@ public sealed class ResponsesRequestSnapshot : IDisposable
                 {
                     ReadValue(ref reader);
                     stream = reader.TokenType == JsonTokenType.True;
+                    SkipNestedValue(ref reader);
+                    continue;
+                }
+
+                if (reader.ValueTextEquals("service_tier"u8))
+                {
+                    ReadValue(ref reader);
+                    if (reader.TokenType == JsonTokenType.String)
+                        serviceTier = reader.GetString();
                     SkipNestedValue(ref reader);
                     continue;
                 }
@@ -174,7 +189,7 @@ public sealed class ResponsesRequestSnapshot : IDisposable
         {
         }
 
-        return new SnapshotMetadata(requestModel, stream, previousResponseId, eventType, store, isObject);
+        return new SnapshotMetadata(requestModel, stream, serviceTier, previousResponseId, eventType, store, isObject);
     }
 
     private static void ReadValue(ref Utf8JsonReader reader)
@@ -192,6 +207,7 @@ public sealed class ResponsesRequestSnapshot : IDisposable
     private readonly record struct SnapshotMetadata(
         string? RequestModel,
         bool Stream,
+        string? ServiceTier,
         string? PreviousResponseId,
         string? EventType,
         bool Store,

@@ -158,6 +158,63 @@ public sealed class PriceCalculatorTests
         Assert.Equal(0.52m, cost.Total);
     }
 
+    [Theory]
+    [InlineData("default", false, 1)]
+    [InlineData("default", true, 1)]
+    [InlineData("priority", false, 2)]
+    [InlineData("fast", false, 2)]
+    [InlineData("flex", false, 0.5)]
+    [InlineData("batch", false, 0.5)]
+    [InlineData(null, true, 2)]
+    [InlineData(null, false, 1)]
+    public void Calculate_Gpt61Sol_UsesScreenshotRatesForAllServiceTiers(
+        string? serviceTier, bool fastMode, double rateMultiplier)
+    {
+        var calculator = new PriceCalculator(new ModelPricingCatalog
+        {
+            Models = BuiltInModelCatalog.CreatePricingRules()
+        });
+        var settings = new ProviderCostSettings { FastMode = fastMode, Multiplier = 0.13m };
+        var factor = (decimal)rateMultiplier;
+        var shortCost = calculator.Calculate(
+            "gpt-6.1-sol", new UsageTokens(100_000, 50_000, 50_000, 10_000, 0), settings, serviceTier);
+        Assert.Equal(0.20m * factor, shortCost.InputCost);
+        Assert.Equal(0.005m * factor, shortCost.CachedInputCost);
+        Assert.Equal(0.125m * factor, shortCost.CacheCreationInputCost);
+        Assert.Equal(0.10m * factor, shortCost.OutputCost);
+        Assert.Equal(0.43m * factor * 0.13m, shortCost.Total);
+        Assert.Equal(0.13m, shortCost.Multiplier);
+
+        var longCost = calculator.Calculate(
+            "gpt-6.1-sol-2026-09-30", new UsageTokens(300_000, 50_000, 25_000, 10_000, 0), settings, serviceTier);
+        Assert.Equal(1.20m * factor, longCost.InputCost);
+        Assert.Equal(0.01m * factor, longCost.CachedInputCost);
+        Assert.Equal(0.125m * factor, longCost.CacheCreationInputCost);
+        Assert.Equal(0.15m * factor, longCost.OutputCost);
+        Assert.Equal(1.485m * factor * 0.13m, longCost.Total);
+    }
+
+    [Theory]
+    [InlineData(22_000, false)]
+    [InlineData(22_001, true)]
+    public void Calculate_Gpt61Sol_ContextThresholdIncludesCachesAndPricesWholeRequest(
+        long cacheCreationTokens, bool longContext)
+    {
+        var calculator = new PriceCalculator(new ModelPricingCatalog
+        {
+            Models = BuiltInModelCatalog.CreatePricingRules()
+        });
+        var cost = calculator.Calculate(
+            "gpt-6.1-sol",
+            new UsageTokens(150_000, 100_000, cacheCreationTokens, 100_000, 0),
+            new ProviderCostSettings());
+
+        Assert.Equal(longContext ? 0.6m : 0.3m, cost.InputCost);
+        Assert.Equal(longContext ? 0.02m : 0.01m, cost.CachedInputCost);
+        Assert.Equal(cacheCreationTokens / 1_000_000m * (longContext ? 5m : 2.5m), cost.CacheCreationInputCost);
+        Assert.Equal(longContext ? 1.5m : 1m, cost.OutputCost);
+    }
+
     [Fact]
     public void Calculate_UsesSeparateClaudeCacheCreationDurations()
     {

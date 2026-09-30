@@ -4225,6 +4225,14 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         {
             var iconSlug = IconCacheService.ResolveModelIconSlug(rule.Id, rule.IconSlug);
             iconSlugs.Add(iconSlug);
+            var route = activeProvider?.Models.FirstOrDefault(model =>
+                string.Equals(model.Id, rule.Id, StringComparison.OrdinalIgnoreCase));
+            var fastMode = route?.Cost?.FastMode ?? activeProvider?.Cost?.FastMode ?? _config.GlobalCost.FastMode;
+            var serviceTier = !string.IsNullOrWhiteSpace(route?.ServiceTier) ? route.ServiceTier :
+                !string.IsNullOrWhiteSpace(activeProvider?.ServiceTier) ? activeProvider.ServiceTier :
+                fastMode ? "priority" : "default";
+            var serviceMultiplier = PriceCalculator.ResolveServiceTierMultiplier(rule, fastMode, serviceTier);
+            var rowMultiplier = billingMultiplier * serviceMultiplier;
             ModelCatalogRows.Add(new ModelCatalogItem
             {
                 Id = rule.Id,
@@ -4232,25 +4240,30 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
                 AliasesText = rule.Aliases.Count == 0 ? "-" : string.Join(", ", rule.Aliases),
                 IconPath = _iconCacheService.GetIconPath(iconSlug),
                 IconSlug = iconSlug,
-                InputPriceText = FormatPrice(rule.Input, billingMultiplier),
-                InputTierText = FormatTierHint(rule.Input, billingMultiplier),
-                InputOfficialPriceText = FormatOfficialPrice(rule.Input),
-                CachedInputPriceText = FormatPrice(rule.CachedInput, billingMultiplier),
-                CachedInputTierText = FormatTierHint(rule.CachedInput, billingMultiplier, T("models.price.cacheHit")),
-                CachedInputOfficialPriceText = FormatOfficialPrice(rule.CachedInput),
-                CacheCreationInputPriceText = FormatPrice(rule.CacheCreationInput, billingMultiplier),
-                CacheCreationInputTierText = FormatTierHint(rule.CacheCreationInput, billingMultiplier, T("models.price.claudeWrite5m")),
-                CacheCreationInputOfficialPriceText = FormatOfficialPrice(rule.CacheCreationInput),
-                CacheCreationInput1HourPriceText = FormatPrice(rule.CacheCreationInput1Hour, billingMultiplier),
+                ServiceTierText = rule.ServiceTierMultipliers.Count > 0 ? F("models.price.serviceTier", serviceTier) : "",
+                ServiceTierPricingText = rule.ServiceTierMultipliers.Count > 0
+                    ? F("models.price.serviceTierMultipliers", string.Join(", ", rule.ServiceTierMultipliers
+                        .Select(pair => $"{pair.Key} ×{pair.Value.ToString("0.##", CultureInfo.InvariantCulture)}")))
+                    : "",
+                InputPriceText = FormatPrice(rule.Input, rowMultiplier),
+                InputTierText = FormatTierHint(rule.Input, rowMultiplier),
+                InputOfficialPriceText = FormatOfficialPrice(rule.Input, serviceMultiplier),
+                CachedInputPriceText = FormatPrice(rule.CachedInput, rowMultiplier),
+                CachedInputTierText = FormatTierHint(rule.CachedInput, rowMultiplier, T("models.price.cacheHit")),
+                CachedInputOfficialPriceText = FormatOfficialPrice(rule.CachedInput, serviceMultiplier),
+                CacheCreationInputPriceText = FormatPrice(rule.CacheCreationInput, rowMultiplier),
+                CacheCreationInputTierText = FormatTierHint(rule.CacheCreationInput, rowMultiplier, T("models.price.claudeWrite5m")),
+                CacheCreationInputOfficialPriceText = FormatOfficialPrice(rule.CacheCreationInput, serviceMultiplier),
+                CacheCreationInput1HourPriceText = FormatPrice(rule.CacheCreationInput1Hour, rowMultiplier),
                 CacheCreationInput1HourTierText = rule.CacheCreationInput1Hour.Tiers.Count > 0
-                    ? FormatTierHint(rule.CacheCreationInput1Hour, billingMultiplier, T("models.price.claudeWrite1h"))
+                    ? FormatTierHint(rule.CacheCreationInput1Hour, rowMultiplier, T("models.price.claudeWrite1h"))
                     : "",
                 CacheCreationInput1HourOfficialPriceText = rule.CacheCreationInput1Hour.Tiers.Count > 0
-                    ? FormatOfficialPrice(rule.CacheCreationInput1Hour)
+                    ? FormatOfficialPrice(rule.CacheCreationInput1Hour, serviceMultiplier)
                     : "",
-                OutputPriceText = FormatPrice(rule.Output, billingMultiplier),
-                OutputTierText = FormatTierHint(rule.Output, billingMultiplier),
-                OutputOfficialPriceText = FormatOfficialPrice(rule.Output),
+                OutputPriceText = FormatPrice(rule.Output, rowMultiplier),
+                OutputTierText = FormatTierHint(rule.Output, rowMultiplier),
+                OutputOfficialPriceText = FormatOfficialPrice(rule.Output, serviceMultiplier),
                 EditCommand = EditPricingModelCommand,
                 DeleteCommand = RequestRemovePricingModelCommand
             });
@@ -5129,11 +5142,11 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             DisplayFormatters.FormatUnitPrice(overflowPrice * multiplier));
     }
 
-    private string FormatOfficialPrice(TokenPriceTable table)
+    private string FormatOfficialPrice(TokenPriceTable table, decimal multiplier = 1m)
     {
         var prices = table.Tiers.Count == 0
             ? "-"
-            : string.Join(" / ", table.Tiers.Select(tier => DisplayFormatters.FormatUnitPrice(tier.PricePerUnit)));
+            : string.Join(" / ", table.Tiers.Select(tier => DisplayFormatters.FormatUnitPrice(tier.PricePerUnit * multiplier)));
         return F("models.price.official", prices);
     }
 
@@ -6242,6 +6255,12 @@ public sealed class ModelCatalogItem
 
     public string IconSlug { get; init; } = "";
 
+    public string ServiceTierText { get; init; } = "";
+
+    public string ServiceTierPricingText { get; init; } = "";
+
+    public bool HasServiceTierPricing => !string.IsNullOrWhiteSpace(ServiceTierText);
+
     public string InputPriceText { get; init; } = "";
 
     public string InputTierText { get; init; } = "";
@@ -6375,6 +6394,8 @@ public sealed class UsageLogItem
 
     public string Cost { get; init; } = "";
 
+    public string ServiceTier { get; init; } = "";
+
     public string Duration { get; init; } = "";
 
     public string Status { get; init; } = "";
@@ -6400,6 +6421,7 @@ public sealed class UsageLogItem
             OutputTps = DisplayFormatters.FormatTokensPerSecond(
                 DisplayFormatters.CalculateOutputTokensPerSecond(record.Usage.OutputTokens, record.DurationMs)),
             Cost = DisplayFormatters.FormatCost(record.EstimatedCost),
+            ServiceTier = record.ServiceTier ?? (record.FastMode ? "priority" : "default"),
             Duration = record.DurationMs + "ms",
             Status = record.StatusCode.ToString(CultureInfo.InvariantCulture),
             StatusForeground = failed ? FailedStatusForeground : SuccessStatusForeground,

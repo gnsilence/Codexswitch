@@ -168,6 +168,7 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
             try
             {
                 using var document = JsonDocument.Parse(responseBody);
+                context.CaptureResponseServiceTier(document.RootElement);
                 builtResponse = BuildResponsesPayload(context, requestData, document.RootElement);
             }
             catch (JsonException ex)
@@ -345,6 +346,7 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
             try
             {
                 using var document = JsonDocument.Parse(responseBody);
+                context.CaptureResponseServiceTier(document.RootElement);
                 builtResponse = BuildMessagesAnthropicPayload(context, requestModel, document.RootElement);
             }
             catch (JsonException ex)
@@ -1205,6 +1207,7 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                 try
                 {
                     using var document = JsonDocument.Parse(data);
+                    context.CaptureResponseServiceTier(document.RootElement);
                     await ProcessMessagesChatStreamChunkAsync(
                         context.HttpContext,
                         state,
@@ -3745,6 +3748,7 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
         JsonElement chunk,
         CancellationToken cancellationToken)
     {
+        context.CaptureResponseServiceTier(chunk);
         if (state.CreatedAt is null &&
             chunk.TryGetProperty("created", out var createdValue) &&
             createdValue.ValueKind == JsonValueKind.Number &&

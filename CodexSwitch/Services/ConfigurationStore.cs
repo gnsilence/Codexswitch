@@ -2,7 +2,7 @@ namespace CodexSwitch.Services;
 
 public sealed class ConfigurationStore
 {
-    private const int CurrentConfigSchemaVersion = 4;
+    private const int CurrentConfigSchemaVersion = 5;
     private readonly AppPaths _paths;
 
     public ConfigurationStore(AppPaths paths)
@@ -104,6 +104,8 @@ public sealed class ConfigurationStore
         EnsureRequiredBuiltIns(config);
         if (previousSchemaVersion < 4)
             MigrateNewGpt6Models(config);
+        if (previousSchemaVersion < 5)
+            MigrateGpt61SolModel(config);
         if (previousSchemaVersion < 1)
             MigrateLegacyAiossBillingMultipliers(config);
         EnsureProviderClientSupport(config);
@@ -644,6 +646,28 @@ public sealed class ConfigurationStore
         }
     }
 
+    private static void MigrateGpt61SolModel(AppConfig config)
+    {
+        foreach (var provider in config.Providers)
+        {
+            provider.Models ??= [];
+            var models = provider.BuiltinId?.ToLowerInvariant() switch
+            {
+                ProviderTemplateCatalog.AiossPlusBuiltinId or
+                ProviderTemplateCatalog.AiossProBuiltinId or
+                ProviderTemplateCatalog.OpenAiOfficialBuiltinId => BuiltInModelCatalog.OpenAiOfficialModels,
+                ProviderTemplateCatalog.RoutinAiBuiltinId or
+                ProviderTemplateCatalog.RoutinAiPlanBuiltinId => BuiltInModelCatalog.RoutinAiModels,
+                _ => null
+            };
+            if (models is null ||
+                provider.Models.Any(route => string.Equals(route.Id, "gpt-6.1-sol", StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            UpsertModelRoute(provider.Models, models.Single(model => model.Id == "gpt-6.1-sol"));
+        }
+    }
+
     private static bool EnsurePricingDefaults(ModelPricingCatalog catalog)
     {
         catalog.Currency = string.IsNullOrWhiteSpace(catalog.Currency) ? "USD" : catalog.Currency;
@@ -704,6 +728,7 @@ public sealed class ConfigurationStore
         existing.IconSlug = template.IconSlug;
         existing.Aliases = CloneAliases(template.Aliases);
         existing.ContextPricingThresholdTokens = template.ContextPricingThresholdTokens;
+        existing.ServiceTierMultipliers = new(template.ServiceTierMultipliers, StringComparer.OrdinalIgnoreCase);
         existing.Input = CloneTable(template.Input);
         existing.CachedInput = CloneTable(template.CachedInput);
         existing.CacheCreationInput = CloneTable(template.CacheCreationInput);
@@ -721,6 +746,7 @@ public sealed class ConfigurationStore
             IconSlug = template.IconSlug,
             Aliases = CloneAliases(template.Aliases),
             ContextPricingThresholdTokens = template.ContextPricingThresholdTokens,
+            ServiceTierMultipliers = new(template.ServiceTierMultipliers, StringComparer.OrdinalIgnoreCase),
             Input = CloneTable(template.Input),
             CachedInput = CloneTable(template.CachedInput),
             CacheCreationInput = CloneTable(template.CacheCreationInput),

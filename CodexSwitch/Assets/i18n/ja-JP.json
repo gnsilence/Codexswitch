@@ -367,6 +367,8 @@
     "models.price.fast": "Fast",
     "models.price.multiplier": "multiplier",
     "models.price.official": "公式 {0}",
+    "models.price.serviceTier": "課金モード：{0}",
+    "models.price.serviceTierMultipliers": "Standard に対する料金倍率：{0}。入力が 272,000 トークンを超えるとリクエスト全体に長文脈料金を適用します。Batch は料金ルールのみで、バッチジョブは自動送信しません。",
     "models.edit": "モデルを編集",
     "models.delete": "モデルを削除",
     "providerDialog.addTitle": "プロバイダーを追加",

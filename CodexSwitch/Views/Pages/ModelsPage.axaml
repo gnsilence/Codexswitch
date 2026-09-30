@@ -166,6 +166,11 @@
                                                                        FontSize="12"
                                                                        TextTrimming="CharacterEllipsis"
                                                                        ToolTip.Tip="{Binding Id}"/>
+                                                            <ui:CsText Text="{Binding ServiceTierText}"
+                                                                       Classes="muted"
+                                                                       FontSize="11"
+                                                                       IsVisible="{Binding HasServiceTierPricing}"
+                                                                       ToolTip.Tip="{Binding ServiceTierPricingText}"/>
                                                         </StackPanel>
                                                     </Grid>
                                                 </ui:CsTableCell>

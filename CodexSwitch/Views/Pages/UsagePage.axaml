@@ -156,7 +156,8 @@
                                             <TextBlock Text="{Binding OutputTps}" Classes="table-strong" Foreground="#FDE047"/>
                                         </ui:CodexTableCell>
                                         <ui:CodexTableCell Grid.Column="8" MinWidth="92">
-                                            <TextBlock Text="{Binding Cost}" Classes="table-strong"/>
+                                            <TextBlock Text="{Binding Cost}" Classes="table-strong"
+                                                       ToolTip.Tip="{Binding ServiceTier}"/>
                                         </ui:CodexTableCell>
                                         <ui:CodexTableCell Grid.Column="9" MinWidth="92">
                                             <TextBlock Text="{Binding Duration}" Classes="table-muted"/>

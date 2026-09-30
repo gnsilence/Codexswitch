@@ -7,6 +7,13 @@ public static class ResponsesUsageScanner
 {
     public static bool TryParseResponseUsage(string json, out UsageTokens usage, out string? model)
     {
+        return TryParseResponseUsage(json, out usage, out model, out _);
+    }
+
+    public static bool TryParseResponseUsage(
+        string json, out UsageTokens usage, out string? model, out string? serviceTier)
+    {
+        serviceTier = null;
         if (string.IsNullOrWhiteSpace(json))
         {
             usage = default;
@@ -14,13 +21,20 @@ public static class ResponsesUsageScanner
             return false;
         }
 
-        return TryParseResponseUsage(Encoding.UTF8.GetBytes(json), out usage, out model);
+        return TryParseResponseUsage(Encoding.UTF8.GetBytes(json), out usage, out model, out serviceTier);
     }
 
     public static bool TryParseResponseUsage(ReadOnlySpan<byte> json, out UsageTokens usage, out string? model)
     {
+        return TryParseResponseUsage(json, out usage, out model, out _);
+    }
+
+    public static bool TryParseResponseUsage(
+        ReadOnlySpan<byte> json, out UsageTokens usage, out string? model, out string? serviceTier)
+    {
         usage = default;
         model = null;
+        serviceTier = null;
 
         try
         {
@@ -31,12 +45,14 @@ public static class ResponsesUsageScanner
             var parsed = ReadResponseObject(ref reader);
             usage = parsed.Usage;
             model = parsed.Model;
+            serviceTier = parsed.ServiceTier;
             return parsed.HasUsage && HasUsage(usage);
         }
         catch (JsonException)
         {
             usage = default;
             model = null;
+            serviceTier = null;
             return false;
         }
     }
@@ -47,8 +63,19 @@ public static class ResponsesUsageScanner
         out UsageTokens usage,
         out string? model)
     {
+        return TryParseCompletedSse(eventName, dataBuilder, out usage, out model, out _);
+    }
+
+    public static bool TryParseCompletedSse(
+        string? eventName,
+        StringBuilder dataBuilder,
+        out UsageTokens usage,
+        out string? model,
+        out string? serviceTier)
+    {
         usage = default;
         model = null;
+        serviceTier = null;
 
         if (dataBuilder.Length == 0)
             return false;
@@ -61,7 +88,7 @@ public static class ResponsesUsageScanner
         if (!IsCompletedEvent(eventName, bytes))
             return false;
 
-        return TryParseResponseUsage(bytes, out usage, out model);
+        return TryParseResponseUsage(bytes, out usage, out model, out serviceTier);
     }
 
     public static bool TryParseEventType(string message, out string? eventType)
@@ -286,6 +313,15 @@ public static class ResponsesUsageScanner
                 ReadValue(ref reader);
                 if (reader.TokenType == JsonTokenType.String)
                     parsed.Model = reader.GetString();
+                SkipNestedValue(ref reader);
+                continue;
+            }
+
+            if (reader.ValueTextEquals("service_tier"u8))
+            {
+                ReadValue(ref reader);
+                if (reader.TokenType == JsonTokenType.String)
+                    parsed.ServiceTier = reader.GetString();
                 SkipNestedValue(ref reader);
                 continue;
             }
@@ -830,6 +866,8 @@ public static class ResponsesUsageScanner
         public UsageTokens Usage { get; set; }
 
         public string? Model { get; set; }
+
+        public string? ServiceTier { get; set; }
 
         public bool HasUsage { get; set; }
     }

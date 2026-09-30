@@ -5,7 +5,7 @@ namespace CodexSwitch.Services;
 
 public static class BuiltInModelCatalog
 {
-    public const string PricingSchemaVersion = "1.7";
+    public const string PricingSchemaVersion = "1.8";
     public const long OpenAiLongContextThresholdTokens = 272_000;
     public const long XiaomiLongContextThresholdTokens = 256_000;
 
@@ -14,6 +14,7 @@ public static class BuiltInModelCatalog
     public static IReadOnlyList<ProviderTemplateModel> RoutinAiModels { get; } =
     [
         OpenAiResponsesRoute("gpt-6-astra", "GPT-6 Astra", serviceTier: "priority", fastMode: true),
+        OpenAiResponsesRoute("gpt-6.1-sol", "GPT-6.1 Sol", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-6-sol", "GPT-6 Sol", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-6-luna", "GPT-6 Luna", serviceTier: "priority", fastMode: true),
         OpenAiResponsesRoute("gpt-5.6-sol", "GPT-5.6 Sol", serviceTier: "priority", fastMode: true),
@@ -31,6 +32,7 @@ public static class BuiltInModelCatalog
     public static IReadOnlyList<ProviderTemplateModel> OpenAiOfficialModels { get; } =
     [
         OpenAiResponsesRoute("gpt-6-astra", "GPT-6 Astra"),
+        OpenAiResponsesRoute("gpt-6.1-sol", "GPT-6.1 Sol"),
         OpenAiResponsesRoute("gpt-6-sol", "GPT-6 Sol"),
         OpenAiResponsesRoute("gpt-6-luna", "GPT-6 Luna"),
         OpenAiResponsesRoute("gpt-5.6-sol", "GPT-5.6 Sol"),
@@ -120,6 +122,23 @@ public static class BuiltInModelCatalog
                 Tiered(OpenAiLongContextThresholdTokens, 50m, 75m),
                 aliases: ["gpt-6-astra*"],
                 contextPricingThresholdTokens: OpenAiLongContextThresholdTokens),
+            CreateRule(
+                "gpt-6.1-sol",
+                "GPT-6.1 Sol",
+                "openai",
+                Tiered(OpenAiLongContextThresholdTokens, 2m, 4m),
+                Tiered(OpenAiLongContextThresholdTokens, 0.10m, 0.20m),
+                Tiered(OpenAiLongContextThresholdTokens, 2.50m, 5m),
+                Tiered(OpenAiLongContextThresholdTokens, 10m, 15m),
+                aliases: ["gpt-6.1-sol*"],
+                contextPricingThresholdTokens: OpenAiLongContextThresholdTokens,
+                serviceTierMultipliers: new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["batch"] = 0.5m,
+                    ["flex"] = 0.5m,
+                    ["fast"] = 2m,
+                    ["priority"] = 2m
+                }),
             CreateRule(
                 "gpt-6-sol",
                 "GPT-6 Sol",
@@ -311,7 +330,8 @@ public static class BuiltInModelCatalog
         TokenPriceTable output,
         IEnumerable<string>? aliases = null,
         long? contextPricingThresholdTokens = null,
-        TokenPriceTable? cacheCreationInput1Hour = null)
+        TokenPriceTable? cacheCreationInput1Hour = null,
+        Dictionary<string, decimal>? serviceTierMultipliers = null)
     {
         var rule = new ModelPricingRule
         {
@@ -319,6 +339,7 @@ public static class BuiltInModelCatalog
             DisplayName = displayName,
             IconSlug = iconSlug,
             ContextPricingThresholdTokens = contextPricingThresholdTokens,
+            ServiceTierMultipliers = serviceTierMultipliers ?? new(StringComparer.OrdinalIgnoreCase),
             Input = input,
             CachedInput = cachedInput,
             CacheCreationInput = cacheCreationInput,

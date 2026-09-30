@@ -25,7 +25,8 @@ public static class ProtocolAdapterCommon
         string? error)
     {
         var billedModel = string.IsNullOrWhiteSpace(responseModel) ? requestModel : responseModel;
-        var cost = context.PriceCalculator.Calculate(billedModel, usage, context.CostSettings);
+        var serviceTier = context.ResolveBillingServiceTier();
+        var cost = context.PriceCalculator.Calculate(billedModel, usage, context.CostSettings, serviceTier);
         return new UsageLogRecord
         {
             Timestamp = DateTimeOffset.UtcNow,
@@ -36,6 +37,7 @@ public static class ProtocolAdapterCommon
             BilledModel = billedModel,
             Stream = stream,
             FastMode = context.CostSettings.FastMode,
+            ServiceTier = serviceTier,
             Usage = usage,
             CostMultiplier = cost.Multiplier,
             EstimatedCost = cost.Total,

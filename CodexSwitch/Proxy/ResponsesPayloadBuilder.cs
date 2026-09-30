@@ -117,7 +117,10 @@ public static class ResponsesPayloadBuilder
             if (!wroteModel && !string.IsNullOrWhiteSpace(upstreamModel))
                 writer.WriteString("model", upstreamModel);
 
-            if (!wroteServiceTier && ShouldForceFastTier(costSettings))
+            if (!wroteServiceTier &&
+                (ShouldForceFastTier(costSettings) ||
+                 !string.IsNullOrWhiteSpace(model?.ServiceTier) ||
+                 !string.IsNullOrWhiteSpace(provider.ServiceTier)))
                 writer.WriteString("service_tier", ResolveFastTier(provider, model));
 
             if (overrides?.ForceStoreFalse == true)
@@ -207,7 +210,10 @@ public static class ResponsesPayloadBuilder
             if (!wroteModel && !string.IsNullOrWhiteSpace(fallbackModel))
                 writer.WriteString("model", fallbackModel);
 
-            if (!wroteServiceTier && ShouldForceFastTier(costSettings))
+            if (!wroteServiceTier &&
+                (ShouldForceFastTier(costSettings) ||
+                 !string.IsNullOrWhiteSpace(model?.ServiceTier) ||
+                 !string.IsNullOrWhiteSpace(provider.ServiceTier)))
                 writer.WriteString("service_tier", ResolveFastTier(provider, model));
 
             if (overrides?.ForceStoreFalse == true)

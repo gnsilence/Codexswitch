@@ -35,6 +35,8 @@ public sealed class ModelPricingRule
 
     public long? ContextPricingThresholdTokens { get; set; }
 
+    public Dictionary<string, decimal> ServiceTierMultipliers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     public TokenPriceTable Input { get; set; } = new();
 
     public TokenPriceTable CachedInput { get; set; } = new();

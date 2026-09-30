@@ -367,6 +367,8 @@
     "models.price.fast": "Fast",
     "models.price.multiplier": "multiplier",
     "models.price.official": "Official {0}",
+    "models.price.serviceTier": "Billing tier: {0}",
+    "models.price.serviceTierMultipliers": "Rate multipliers relative to Standard: {0}. Requests above 272,000 input tokens use long-context rates for the whole request. Batch is a pricing rule only; it does not submit batch jobs.",
     "models.edit": "Edit model",
     "models.delete": "Delete model",
     "providerDialog.addTitle": "Add provider",
