@@ -169,6 +169,114 @@ public sealed class ResponsesPayloadBuilderTests
     }
 
     [Fact]
+    public void Build_Gpt61SolUltraReasoningMapsToMaxForResponsesUpstream()
+    {
+        var json = """
+            {
+              "model": "gpt-6.1-sol",
+              "reasoning": { "effort": "ultra", "summary": "auto" },
+              "input": "hello"
+            }
+            """;
+        using var snapshot = ResponsesRequestSnapshot.Parse(json);
+        var provider = new ProviderConfig
+        {
+            DefaultModel = "gpt-6.1-sol",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+        var model = new ModelRouteConfig
+        {
+            Id = "gpt-6.1-sol",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+
+        var bytes = ResponsesPayloadBuilder.Build(snapshot, provider, model, new ProviderCostSettings());
+
+        using var output = JsonDocument.Parse(bytes);
+        Assert.Equal("max", output.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        Assert.Equal("auto", output.RootElement.GetProperty("reasoning").GetProperty("summary").GetString());
+    }
+
+    [Fact]
+    public void Build_Gpt61SolUltraReasoningEffortMapsToMaxForResponsesUpstream()
+    {
+        using var document = JsonDocument.Parse(
+            """{"model":"gpt-6.1-sol","reasoning_effort":"ultra","input":"hello"}""");
+        var provider = new ProviderConfig
+        {
+            DefaultModel = "gpt-6.1-sol",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+        var model = new ModelRouteConfig
+        {
+            Id = "gpt-6.1-sol",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+
+        var bytes = ResponsesPayloadBuilder.Build(
+            document.RootElement,
+            provider,
+            model,
+            new ProviderCostSettings());
+
+        using var output = JsonDocument.Parse(bytes);
+        Assert.Equal("max", output.RootElement.GetProperty("reasoning_effort").GetString());
+    }
+
+    [Fact]
+    public void Build_Gpt61SolRouteWithDifferentUpstreamModelPreservesUltra()
+    {
+        using var document = JsonDocument.Parse(
+            """{"model":"gpt-6.1-sol","reasoning":{"effort":"ultra"},"input":"hello"}""");
+        var provider = new ProviderConfig
+        {
+            DefaultModel = "gpt-6.1-sol",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+        var model = new ModelRouteConfig
+        {
+            Id = "gpt-6.1-sol",
+            UpstreamModel = "gpt-5.5",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+
+        var bytes = ResponsesPayloadBuilder.Build(
+            document.RootElement,
+            provider,
+            model,
+            new ProviderCostSettings());
+
+        using var output = JsonDocument.Parse(bytes);
+        Assert.Equal("ultra", output.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+    }
+
+    [Fact]
+    public void Build_NonGpt61SolModelPreservesUltra()
+    {
+        using var document = JsonDocument.Parse(
+            """{"model":"gpt-5.5","reasoning":{"effort":"ultra"},"input":"hello"}""");
+        var provider = new ProviderConfig
+        {
+            DefaultModel = "gpt-5.5",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+        var model = new ModelRouteConfig
+        {
+            Id = "gpt-5.5",
+            Protocol = ProviderProtocol.OpenAiResponses
+        };
+
+        var bytes = ResponsesPayloadBuilder.Build(
+            document.RootElement,
+            provider,
+            model,
+            new ProviderCostSettings());
+
+        using var output = JsonDocument.Parse(bytes);
+        Assert.Equal("ultra", output.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+    }
+
+    [Fact]
     public void Build_WithExplicitModelConversion_RewritesToTargetModel()
     {
         using var document = JsonDocument.Parse("""{"model":"codex-alias","input":"hello"}""");

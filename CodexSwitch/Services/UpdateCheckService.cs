@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace CodexSwitch.Services;
 
@@ -50,6 +51,8 @@ public sealed class UpdateCheckService
                 : release.HtmlUrl.Trim();
 
             var asset = SelectCompatibleAsset(release.Assets);
+            if (asset is not null)
+                asset = await AttachExpectedHashAsync(asset, release.Assets, cancellationToken);
             if (latestVersion.CompareTo(AppReleaseInfo.CurrentVersion) > 0)
                 return UpdateCheckResult.UpdateAvailable(latestVersion, releaseUrl, release.PublishedAt, asset);
 
@@ -109,7 +112,24 @@ public sealed class UpdateCheckService
             progress?.Report(new UpdateDownloadProgress(downloadedBytes, totalBytes));
             output.Close();
 
-            File.Move(tempPath, targetPath, overwrite: true);
+            if (asset.Size > 0 && downloadedBytes != asset.Size)
+                throw new InvalidDataException(
+                    $"Downloaded update size mismatch: expected {asset.Size} bytes, got {downloadedBytes} bytes.");
+
+            if (string.IsNullOrWhiteSpace(asset.ExpectedSha256))
+                throw new InvalidDataException("The release does not provide a SHA-256 checksum for this installer.");
+
+            await using (var hashInput = File.OpenRead(tempPath))
+            {
+                var actualHash = Convert.ToHexString(await SHA256.HashDataAsync(hashInput, cancellationToken));
+                if (!string.Equals(actualHash, asset.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException(
+                        $"Downloaded update checksum mismatch: expected {asset.ExpectedSha256}, got {actualHash}.");
+                }
+            }
+
+            ReplaceDownloadedInstaller(tempPath, targetPath);
             return new UpdateDownloadResult(targetPath, downloadedBytes);
         }
         catch
@@ -127,6 +147,32 @@ public sealed class UpdateCheckService
         }
     }
 
+    private static void ReplaceDownloadedInstaller(string tempPath, string targetPath)
+    {
+        if (!File.Exists(targetPath))
+        {
+            File.Move(tempPath, targetPath);
+            return;
+        }
+
+        var previousPath = targetPath + ".previous";
+        try
+        {
+            File.Replace(tempPath, targetPath, previousPath, ignoreMetadataErrors: true);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            File.Copy(targetPath, previousPath, overwrite: true);
+            File.Move(tempPath, targetPath, overwrite: true);
+        }
+        catch (IOException)
+        {
+            // Some file systems do not support File.Replace even though the runtime does.
+            File.Copy(targetPath, previousPath, overwrite: true);
+            File.Move(tempPath, targetPath, overwrite: true);
+        }
+    }
+
     private static UpdateReleaseAsset? SelectCompatibleAsset(IReadOnlyList<GitHubReleaseAssetResponse>? assets)
     {
         if (assets is null || assets.Count == 0)
@@ -141,10 +187,82 @@ public sealed class UpdateCheckService
                 Uri.TryCreate(item.DownloadUrl, UriKind.Absolute, out _));
 
             if (asset is not null)
-                return new UpdateReleaseAsset(asset.Name.Trim(), asset.DownloadUrl.Trim(), Math.Max(0, asset.Size));
+                return new UpdateReleaseAsset(
+                    asset.Name.Trim(),
+                    asset.DownloadUrl.Trim(),
+                    Math.Max(0, asset.Size),
+                    NormalizeSha256(asset.Digest));
         }
 
         return null;
+    }
+
+    private async Task<UpdateReleaseAsset> AttachExpectedHashAsync(
+        UpdateReleaseAsset asset,
+        IReadOnlyList<GitHubReleaseAssetResponse>? assets,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(asset.ExpectedSha256) ||
+            assets is null)
+        {
+            return asset;
+        }
+
+        var checksumAsset = assets.FirstOrDefault(item =>
+            !string.IsNullOrWhiteSpace(item.Name) &&
+            (item.Name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase) ||
+             item.Name.EndsWith(".sha256sum", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(item.Name, "SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase)) &&
+            Uri.TryCreate(item.DownloadUrl, UriKind.Absolute, out _));
+        if (checksumAsset is null)
+            return asset;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, checksumAsset.DownloadUrl);
+        request.Headers.UserAgent.ParseAdd("CodexSwitch/1.0");
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return asset;
+
+        var manifest = await response.Content.ReadAsStringAsync(cancellationToken);
+        return asset with { ExpectedSha256 = ParseChecksumManifest(manifest, asset.Name) };
+    }
+
+    private static string? ParseChecksumManifest(string manifest, string assetName)
+    {
+        foreach (var line in manifest.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!line.Contains(assetName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            foreach (var token in line.Split(
+                         [' ', '\t', '*'],
+                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var normalized = NormalizeSha256(token);
+                if (normalized is not null)
+                    return normalized;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeSha256(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var normalized = value.Trim();
+        if (normalized.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            normalized = normalized["sha256:".Length..];
+
+        return normalized.Length == 64 &&
+            normalized.All(static character => Uri.IsHexDigit(character))
+            ? normalized.ToUpperInvariant()
+            : null;
     }
 
     private static string[] GetCurrentPlatformAssetSuffixes()
@@ -245,7 +363,11 @@ public sealed record UpdateCheckResult(
     }
 }
 
-public sealed record UpdateReleaseAsset(string Name, string DownloadUrl, long Size);
+public sealed record UpdateReleaseAsset(
+    string Name,
+    string DownloadUrl,
+    long Size,
+    string? ExpectedSha256 = null);
 
 public sealed record UpdateDownloadProgress(long DownloadedBytes, long TotalBytes)
 {
@@ -327,4 +449,7 @@ public sealed class GitHubReleaseAssetResponse
 
     [JsonPropertyName("size")]
     public long Size { get; set; }
+
+    [JsonPropertyName("digest")]
+    public string? Digest { get; set; }
 }

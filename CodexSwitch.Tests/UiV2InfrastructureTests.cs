@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Globalization;
@@ -529,7 +530,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -583,6 +585,73 @@ public sealed class UiV2InfrastructureTests : IDisposable
     }
 
     [Fact]
+    public async Task ProxyHostService_InboundAuth_ProtectsV1ButLeavesHealthPublic()
+    {
+        var paths = CreatePaths("inbound-auth");
+        var calculator = new PriceCalculator(new ModelPricingCatalog());
+        var configStore = new ConfigurationStore(paths);
+        var config = new AppConfig
+        {
+            ActiveProviderId = "first",
+            ActiveCodexProviderId = "first",
+            Proxy =
+            {
+                Enabled = true,
+                Host = "127.0.0.1",
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
+            },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "first",
+                    DisplayName = "First",
+                    SupportsCodex = true,
+                    BaseUrl = "https://example.com/v1",
+                    Protocol = ProviderProtocol.OpenAiResponses,
+                    DefaultModel = "gpt-5.5"
+                }
+            }
+        };
+
+        using var upstream = new HttpClient();
+        await using var service = new ProxyHostService(
+            new UsageMeter(calculator),
+            calculator,
+            CreateUsageLogWriter(paths),
+            new CodexConfigWriter(paths),
+            new ClaudeCodeConfigWriter(paths),
+            new ProviderAuthService(configStore, config, upstream),
+            Array.Empty<IProviderProtocolAdapter>());
+
+        await service.StartAsync(config);
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{config.Proxy.Port}") };
+
+        using var health = await client.GetAsync("/health");
+        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+
+        using var missingKey = await client.GetAsync("/v1/models");
+        Assert.Equal(HttpStatusCode.Unauthorized, missingKey.StatusCode);
+
+        using var wrongKey = new HttpRequestMessage(HttpMethod.Get, "/v1/models");
+        wrongKey.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "wrong-key");
+        using var wrongResponse = await client.SendAsync(wrongKey);
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongResponse.StatusCode);
+
+        using var unauthorizedSocket = new ClientWebSocket();
+        await Assert.ThrowsAnyAsync<WebSocketException>(() =>
+            unauthorizedSocket.ConnectAsync(
+                new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"),
+                CancellationToken.None));
+
+        using var validKey = new HttpRequestMessage(HttpMethod.Get, "/v1/models");
+        validKey.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+        using var validResponse = await client.SendAsync(validKey);
+        Assert.Equal(HttpStatusCode.OK, validResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task ProxyHostService_Responses_UsesOnlyActiveProviderOnTransientFailure()
     {
         var paths = CreatePaths("responses-failover");
@@ -610,6 +679,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent("""{"model":"switch-model","input":"ping"}""", Encoding.UTF8, "application/json"));
@@ -647,6 +717,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent("""{"model":"switch-model","input":"ping"}""", Encoding.UTF8, "application/json"));
@@ -675,6 +746,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent("""{"model":"switch-model","input":"ping"}""", Encoding.UTF8, "application/json"));
@@ -715,6 +787,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent("""{"model":"switch-model","input":"ping"}""", Encoding.UTF8, "application/json"));
@@ -759,6 +832,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent(
@@ -771,6 +845,361 @@ public sealed class UiV2InfrastructureTests : IDisposable
         Assert.Equal(2, callCount);
         Assert.Equal(1, meter.Snapshot.Requests);
         Assert.Equal(0, meter.Snapshot.Errors);
+    }
+
+    [Fact]
+    public async Task ProxyHostService_ChatCompletions_ConvertsResponsesProviderNonStreaming()
+    {
+        var paths = CreatePaths("chat-completions-responses");
+        var config = CreateResponsesProxyConfig(
+            GetAvailablePort(),
+            CreateResponsesProvider("responses", "https://responses.test/v1"));
+        using var upstreamHttpClient = new HttpClient(new AsyncHandler(async (request, cancellationToken) =>
+        {
+            Assert.Equal(new Uri("https://responses.test/v1/responses"), request.RequestUri);
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            using var payload = JsonDocument.Parse(body);
+            Assert.Equal("switch-upstream", payload.RootElement.GetProperty("model").GetString());
+            Assert.Equal("user", payload.RootElement.GetProperty("input")[0].GetProperty("role").GetString());
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "id": "resp_chat",
+                      "object": "response",
+                      "status": "completed",
+                      "model": "switch-upstream",
+                      "output": [
+                        {
+                          "type": "reasoning",
+                          "summary": [{ "type": "summary_text", "text": "Think." }]
+                        },
+                        {
+                          "type": "message",
+                          "role": "assistant",
+                          "content": [{ "type": "output_text", "text": "pong" }]
+                        }
+                      ],
+                      "usage": { "input_tokens": 4, "output_tokens": 2 }
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        }));
+        var meter = new UsageMeter(new PriceCalculator(new ModelPricingCatalog()));
+        await using var service = CreateProxyHostService(paths, config, meter, upstreamHttpClient);
+
+        await service.StartAsync(config);
+
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{config.Proxy.Port}/v1/chat/completions",
+            new StringContent(
+                """{"model":"switch-model","messages":[{"role":"user","content":"ping"}]}""",
+                Encoding.UTF8,
+                "application/json"));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+        Assert.Equal("chat.completion", root.GetProperty("object").GetString());
+        Assert.Equal("pong", root.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+        Assert.Equal("Think.", root.GetProperty("choices")[0].GetProperty("message").GetProperty("reasoning_content").GetString());
+        Assert.Equal(4, root.GetProperty("usage").GetProperty("prompt_tokens").GetInt64());
+        Assert.Equal(2, root.GetProperty("usage").GetProperty("completion_tokens").GetInt64());
+        Assert.Equal(1, meter.Snapshot.Requests);
+        Assert.Equal(4, meter.Snapshot.InputTokens);
+        Assert.Equal(2, meter.Snapshot.OutputTokens);
+    }
+
+    [Fact]
+    public async Task ProxyHostService_ChatCompletions_ConvertsResponsesProviderStreaming()
+    {
+        var paths = CreatePaths("chat-completions-responses-stream");
+        var config = CreateResponsesProxyConfig(
+            GetAvailablePort(),
+            CreateResponsesProvider("responses", "https://responses.test/v1"));
+        using var upstreamHttpClient = new HttpClient(new AsyncHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "event: response.output_text.delta\n" +
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"po\"}\n\n" +
+                    "event: response.output_text.delta\n" +
+                    "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ng\"}\n\n" +
+                    "event: response.completed\n" +
+                    "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream\",\"model\":\"switch-upstream\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}}\n\n",
+                    Encoding.UTF8,
+                    "text/event-stream")
+            })));
+        var meter = new UsageMeter(new PriceCalculator(new ModelPricingCatalog()));
+        await using var service = CreateProxyHostService(paths, config, meter, upstreamHttpClient);
+
+        await service.StartAsync(config);
+
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{config.Proxy.Port}/v1/chat/completions",
+            new StringContent(
+                """{"model":"switch-model","stream":true,"messages":[{"role":"user","content":"ping"}]}""",
+                Encoding.UTF8,
+                "application/json"));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        Assert.True(body.Contains("\"content\":\"po\"", StringComparison.Ordinal), body);
+        Assert.Contains("\"content\":\"ng\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"completion_tokens\":2", body, StringComparison.Ordinal);
+        Assert.Contains("data: [DONE]", body, StringComparison.Ordinal);
+        Assert.Equal(1, meter.Snapshot.Requests);
+        Assert.Equal(3, meter.Snapshot.InputTokens);
+        Assert.Equal(2, meter.Snapshot.OutputTokens);
+    }
+
+    [Fact]
+    public async Task ProxyHostService_ChatCompletions_RetriesTransientChatProviderFailure()
+    {
+        var paths = CreatePaths("chat-completions-chat-retry");
+        var calculator = new PriceCalculator(new ModelPricingCatalog());
+        var meter = new UsageMeter(calculator);
+        var configStore = new ConfigurationStore(paths);
+        var callCount = 0;
+        using var upstreamHttpClient = new HttpClient(new AsyncHandler((_, _) =>
+        {
+            if (Interlocked.Increment(ref callCount) == 1)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                {
+                    Content = new StringContent("""{"error":"temporary"}""", Encoding.UTF8, "application/json")
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "id": "chatcmpl_retry",
+                      "object": "chat.completion",
+                      "model": "switch-upstream",
+                      "choices": [
+                        {
+                          "index": 0,
+                          "message": { "role": "assistant", "content": "recovered" },
+                          "finish_reason": "stop"
+                        }
+                      ],
+                      "usage": { "prompt_tokens": 2, "completion_tokens": 1 }
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        }));
+        var config = new AppConfig
+        {
+            ActiveCodexProviderId = "chat",
+            ActiveProviderId = "chat",
+            Proxy =
+            {
+                Enabled = true,
+                Host = "127.0.0.1",
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
+            },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "chat",
+                    SupportsCodex = true,
+                    BaseUrl = "https://upstream.test/v1",
+                    ApiKey = "provider-key",
+                    Protocol = ProviderProtocol.OpenAiChat,
+                    DefaultModel = "switch-model",
+                    Models =
+                    {
+                        new ModelRouteConfig
+                        {
+                            Id = "switch-model",
+                            Protocol = ProviderProtocol.OpenAiChat,
+                            UpstreamModel = "switch-upstream"
+                        }
+                    }
+                }
+            }
+        };
+        await using var service = new ProxyHostService(
+            meter,
+            calculator,
+            CreateUsageLogWriter(paths),
+            new CodexConfigWriter(paths),
+            new ClaudeCodeConfigWriter(paths),
+            new ProviderAuthService(configStore, config, new HttpClient()),
+            [new OpenAiChatAdapter(upstreamHttpClient)]);
+
+        await service.StartAsync(config);
+
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{config.Proxy.Port}/v1/chat/completions",
+            new StringContent(
+                """{"model":"switch-model","messages":[{"role":"user","content":"ping"}]}""",
+                Encoding.UTF8,
+                "application/json"));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(2, callCount);
+        Assert.Contains("\"recovered\"", body, StringComparison.Ordinal);
+        Assert.Equal(1, meter.Snapshot.Requests);
+        Assert.Equal(0, meter.Snapshot.Errors);
+    }
+
+    [Fact]
+    public async Task ProxyHostService_ChatCompletions_ConvertsAnthropicProvider()
+    {
+        var paths = CreatePaths("chat-completions-anthropic");
+        var config = CreateResponsesProxyConfig(
+            GetAvailablePort(),
+            new ProviderConfig
+            {
+                Id = "anthropic",
+                SupportsCodex = true,
+                BaseUrl = "https://anthropic.test/v1",
+                ApiKey = "provider-key",
+                Protocol = ProviderProtocol.AnthropicMessages,
+                DefaultModel = "sonnet",
+                Models =
+                {
+                    new ModelRouteConfig
+                    {
+                        Id = "sonnet",
+                        Protocol = ProviderProtocol.AnthropicMessages,
+                        UpstreamModel = "claude-sonnet-4-5"
+                    }
+                }
+            });
+        using var upstreamHttpClient = new HttpClient(new AsyncHandler(async (request, cancellationToken) =>
+        {
+            Assert.Equal(new Uri("https://anthropic.test/v1/messages"), request.RequestUri);
+            Assert.True(request.Headers.TryGetValues("x-api-key", out var keys));
+            Assert.Equal("provider-key", Assert.Single(keys));
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "id": "msg_chat",
+                      "type": "message",
+                      "role": "assistant",
+                      "model": "claude-sonnet-4-5",
+                      "content": [{ "type": "text", "text": "pong" }],
+                      "usage": { "input_tokens": 5, "output_tokens": 2 }
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        }));
+        var meter = new UsageMeter(new PriceCalculator(new ModelPricingCatalog()));
+        await using var service = new ProxyHostService(
+            meter,
+            new PriceCalculator(new ModelPricingCatalog()),
+            CreateUsageLogWriter(paths),
+            new CodexConfigWriter(paths),
+            new ClaudeCodeConfigWriter(paths),
+            new ProviderAuthService(new ConfigurationStore(paths), config, new HttpClient()),
+            [new AnthropicMessagesAdapter(upstreamHttpClient)]);
+
+        await service.StartAsync(config);
+
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{config.Proxy.Port}/v1/chat/completions",
+            new StringContent(
+                """{"model":"sonnet","messages":[{"role":"user","content":"ping"}]}""",
+                Encoding.UTF8,
+                "application/json"));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(body);
+        Assert.Equal("pong", json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString());
+        Assert.Equal(5, json.RootElement.GetProperty("usage").GetProperty("prompt_tokens").GetInt64());
+        Assert.Equal(2, json.RootElement.GetProperty("usage").GetProperty("completion_tokens").GetInt64());
+        Assert.Equal(1, meter.Snapshot.Requests);
+    }
+
+    [Fact]
+    public async Task ProxyHostService_ChatCompletions_ConvertsResponseFunctionCall()
+    {
+        var paths = CreatePaths("chat-completions-tools");
+        var config = CreateResponsesProxyConfig(
+            GetAvailablePort(),
+            CreateResponsesProvider("responses", "https://responses.test/v1"));
+        using var upstreamHttpClient = new HttpClient(new AsyncHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "id": "resp_tool",
+                      "object": "response",
+                      "status": "completed",
+                      "model": "switch-upstream",
+                      "output": [
+                        {
+                          "type": "function_call",
+                          "call_id": "call_lookup",
+                          "name": "lookup",
+                          "arguments": "{\"query\":\"codex\"}"
+                        }
+                      ],
+                      "usage": { "input_tokens": 6, "output_tokens": 4 }
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            })));
+        await using var service = CreateProxyHostService(
+            paths,
+            config,
+            new UsageMeter(new PriceCalculator(new ModelPricingCatalog())),
+            upstreamHttpClient);
+
+        await service.StartAsync(config);
+
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+        using var response = await client.PostAsync(
+            $"http://127.0.0.1:{config.Proxy.Port}/v1/chat/completions",
+            new StringContent(
+                """
+                {
+                  "model":"switch-model",
+                  "messages":[{"role":"user","content":"find it"}],
+                  "tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]
+                }
+                """,
+                Encoding.UTF8,
+                "application/json"));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(body);
+        var tool = json.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("tool_calls")[0];
+        Assert.Equal("call_lookup", tool.GetProperty("id").GetString());
+        Assert.Equal("lookup", tool.GetProperty("function").GetProperty("name").GetString());
+        Assert.Equal("{\"query\":\"codex\"}", tool.GetProperty("function").GetProperty("arguments").GetString());
     }
 
     [Fact]
@@ -799,6 +1228,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent("""{"model":"switch-model","input":"ping"}""", Encoding.UTF8, "application/json"));
@@ -832,6 +1262,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent("""{"model":"switch-model","input":"ping"}""", Encoding.UTF8, "application/json"));
@@ -870,6 +1301,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/responses",
             new StringContent("""{"model":"switch-model","input":"ping"}""", Encoding.UTF8, "application/json"));
@@ -959,6 +1391,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{config.Proxy.Port}/v1/messages")
         {
             Content = new StringContent(
@@ -1022,7 +1455,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1060,6 +1494,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/messages",
             new StringContent(
@@ -1120,7 +1555,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1158,6 +1594,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{config.Proxy.Port}/v1/messages",
             new StringContent(
@@ -1201,7 +1638,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1271,7 +1709,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1291,6 +1730,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
 
         await service.StartAsync(config);
         using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
 
         await PostResponsesAsync(client, config.Proxy.Port);
         config.ActiveProviderId = "second";
@@ -1322,7 +1762,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1361,6 +1802,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
         await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"), CancellationToken.None);
 
         await SendWebSocketTextAsync(
@@ -1415,7 +1857,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1456,6 +1899,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
 
         using (var firstSocket = new ClientWebSocket())
         {
+            firstSocket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
             await firstSocket.ConnectAsync(
                 new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"),
                 CancellationToken.None);
@@ -1469,6 +1913,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
 
         using (var secondSocket = new ClientWebSocket())
         {
+            secondSocket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
             await secondSocket.ConnectAsync(
                 new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"),
                 CancellationToken.None);
@@ -1543,7 +1988,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1574,6 +2020,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
         await socket.ConnectAsync(
             new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"),
             CancellationToken.None);
@@ -1610,7 +2057,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1641,6 +2089,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
         await socket.ConnectAsync(
             new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"),
             CancellationToken.None);
@@ -1673,7 +2122,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1703,6 +2153,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
         await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"), CancellationToken.None);
         await SendWebSocketTextAsync(socket, """{"type":"response.create","model":"gpt-5.5","input":"ping"}""");
         var error = await ReceiveWebSocketTextAsync(socket);
@@ -1730,7 +2181,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             }
         };
         var provider = new ProviderConfig
@@ -1789,6 +2241,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
         await socket.ConnectAsync(new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"), CancellationToken.None);
         await SendWebSocketTextAsync(socket, """{"type":"response.create","model":"gpt-5.5","input":"ping"}""");
         await ReadUntilWebSocketEventAsync(socket, "response.completed");
@@ -1821,7 +2274,8 @@ public sealed class UiV2InfrastructureTests : IDisposable
             {
                 Enabled = true,
                 Host = "127.0.0.1",
-                Port = GetAvailablePort()
+                Port = GetAvailablePort(),
+                InboundApiKey = "local-secret"
             },
             Providers =
             {
@@ -1851,6 +2305,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
         await service.StartAsync(config);
 
         using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", "Bearer local-secret");
         await socket.ConnectAsync(
             new Uri($"ws://127.0.0.1:{config.Proxy.Port}/v1/responses"),
             CancellationToken.None);
@@ -3407,6 +3862,7 @@ public sealed class UiV2InfrastructureTests : IDisposable
 
     private static async Task PostResponsesAsync(HttpClient client, int port)
     {
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var response = await client.PostAsync(
             $"http://127.0.0.1:{port}/v1/responses",
             new StringContent(

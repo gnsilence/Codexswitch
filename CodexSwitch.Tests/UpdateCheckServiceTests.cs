@@ -76,7 +76,12 @@ public sealed class UpdateCheckServiceTests
                 Content = new ByteArrayContent(bytes)
             }));
         var service = new UpdateCheckService(httpClient);
-        var asset = new UpdateReleaseAsset("CodexSwitch-v2.0.0-win-x64-setup.exe", "https://downloads.local/setup.exe", bytes.Length);
+        var checksum = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+        var asset = new UpdateReleaseAsset(
+            "CodexSwitch-v2.0.0-win-x64-setup.exe",
+            "https://downloads.local/setup.exe",
+            bytes.Length,
+            checksum);
         var targetDirectory = Path.Combine(Path.GetTempPath(), "CodexSwitch.Tests", Guid.NewGuid().ToString("N"));
         var progress = new List<UpdateDownloadProgress>();
 
@@ -88,6 +93,77 @@ public sealed class UpdateCheckServiceTests
             Assert.Equal(bytes.Length, result.BytesWritten);
             Assert.Equal(bytes, await File.ReadAllBytesAsync(result.FilePath));
             Assert.Contains(progress, item => item.DownloadedBytes == bytes.Length && item.TotalBytes == bytes.Length);
+        }
+        finally
+        {
+            if (Directory.Exists(targetDirectory))
+                Directory.Delete(targetDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadUpdateAsync_PreservesPreviousSuccessfulInstaller()
+    {
+        var oldBytes = Encoding.UTF8.GetBytes("old-installer");
+        var newBytes = Encoding.UTF8.GetBytes("new-installer");
+        using var httpClient = new HttpClient(new StubHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(newBytes)
+            }));
+        var service = new UpdateCheckService(httpClient);
+        var targetDirectory = Path.Combine(Path.GetTempPath(), "CodexSwitch.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(targetDirectory);
+        var targetPath = Path.Combine(targetDirectory, "CodexSwitch-update.exe");
+        await File.WriteAllBytesAsync(targetPath, oldBytes);
+        var asset = new UpdateReleaseAsset(
+            "CodexSwitch-update.exe",
+            "https://downloads.local/setup.exe",
+            newBytes.Length,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(newBytes)));
+
+        try
+        {
+            await service.DownloadUpdateAsync(asset, targetDirectory);
+
+            Assert.Equal(newBytes, await File.ReadAllBytesAsync(targetPath));
+            Assert.Equal(oldBytes, await File.ReadAllBytesAsync(targetPath + ".previous"));
+        }
+        finally
+        {
+            if (Directory.Exists(targetDirectory))
+                Directory.Delete(targetDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadUpdateAsync_ChecksumFailure_DoesNotReplaceExistingInstaller()
+    {
+        var oldBytes = Encoding.UTF8.GetBytes("old-installer");
+        var downloadedBytes = Encoding.UTF8.GetBytes("tampered-installer");
+        using var httpClient = new HttpClient(new StubHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(downloadedBytes)
+            }));
+        var service = new UpdateCheckService(httpClient);
+        var targetDirectory = Path.Combine(Path.GetTempPath(), "CodexSwitch.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(targetDirectory);
+        var targetPath = Path.Combine(targetDirectory, "CodexSwitch-update.exe");
+        await File.WriteAllBytesAsync(targetPath, oldBytes);
+        var asset = new UpdateReleaseAsset(
+            "CodexSwitch-update.exe",
+            "https://downloads.local/setup.exe",
+            downloadedBytes.Length,
+            "00");
+
+        try
+        {
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                service.DownloadUpdateAsync(asset, targetDirectory));
+
+            Assert.Equal(oldBytes, await File.ReadAllBytesAsync(targetPath));
+            Assert.False(File.Exists(targetPath + ".previous"));
         }
         finally
         {

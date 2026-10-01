@@ -1,14 +1,26 @@
+using System.Security.Cryptography;
+using System.Text.Json.Nodes;
+
 namespace CodexSwitch.Services;
 
 public sealed class ConfigurationStore
 {
     private const int CurrentConfigSchemaVersion = 5;
     private readonly AppPaths _paths;
+    private readonly ISecretStore _secretStore;
 
     public ConfigurationStore(AppPaths paths)
+        : this(paths, null)
+    {
+    }
+
+    internal ConfigurationStore(AppPaths paths, ISecretStore? secretStore)
     {
         _paths = paths;
+        _secretStore = secretStore ?? new SecretStore(paths);
     }
+
+    public bool IsUsingFallbackSecretStorage => _secretStore.IsUsingFallbackStorage;
 
     public AppConfig LoadConfig()
     {
@@ -26,9 +38,16 @@ public sealed class ConfigurationStore
                 ?? CreateDefaultConfig();
         }
 
+        var legacyInboundApiKey = config.Proxy?.InboundApiKey;
         var requiresMigrationSave = config.SchemaVersion < CurrentConfigSchemaVersion;
         EnsureValidDefaults(config);
-        if (requiresMigrationSave)
+        if (string.IsNullOrWhiteSpace(legacyInboundApiKey) &&
+            _secretStore.TryGet("proxy.inbound-api-key", out var storedInboundApiKey))
+        {
+            config.Proxy!.InboundApiKey = storedInboundApiKey;
+        }
+        var secretsMigrated = _secretStore.Hydrate(config);
+        if (requiresMigrationSave || secretsMigrated)
             SaveConfig(config);
         return config;
     }
@@ -36,7 +55,9 @@ public sealed class ConfigurationStore
     public void SaveConfig(AppConfig config)
     {
         EnsureValidDefaults(config);
-        SaveJsonAtomically(_paths.ConfigPath, config, CodexSwitchJsonContext.Default.AppConfig);
+        SaveConfigSnapshot();
+        _secretStore.Persist(config);
+        SaveSanitizedConfigAtomically(config);
     }
 
     public ModelPricingCatalog LoadPricing()
@@ -82,12 +103,15 @@ public sealed class ConfigurationStore
         config.Ui.Theme = AppThemeService.Normalize(config.Ui.Theme);
         if (string.IsNullOrWhiteSpace(config.Ui.Language))
             config.Ui.Language = "zh-CN";
+        config.Ui.UsageLogRetentionDays = Math.Clamp(config.Ui.UsageLogRetentionDays, 1, 3650);
         if (!Enum.IsDefined(config.Network.ProxyMode))
             config.Network.ProxyMode = OutboundProxyMode.System;
         if (!Enum.IsDefined(config.Network.OutboundHttpVersion))
             config.Network.OutboundHttpVersion = OutboundHttpVersion.Http2;
         if (config.Network.ConnectTimeoutSeconds <= 0)
             config.Network.ConnectTimeoutSeconds = 30;
+        if (string.IsNullOrWhiteSpace(config.Proxy.InboundApiKey))
+            config.Proxy.InboundApiKey = "sk-codex";
         config.Network.MaxRetries = Math.Clamp(config.Network.MaxRetries, 0, 5);
         config.Network.RetryBaseDelaySeconds = Math.Clamp(config.Network.RetryBaseDelaySeconds, 1, 10);
         config.Network.CustomProxyUrl = config.Network.CustomProxyUrl?.Trim() ?? "";
@@ -226,6 +250,130 @@ public sealed class ConfigurationStore
     {
         AddFromTemplate(config, ProviderTemplateCatalog.AiossPlusBuiltinId);
         AddFromTemplate(config, ProviderTemplateCatalog.AiossProBuiltinId);
+    }
+
+    private void SaveSanitizedConfigAtomically(AppConfig config)
+    {
+        var json = JsonSerializer.Serialize(config, CodexSwitchJsonContext.Default.AppConfig);
+        var node = JsonNode.Parse(json)?.AsObject() ??
+            throw new InvalidDataException("Unable to serialize CodexSwitch configuration.");
+
+        if (node["proxy"] is JsonObject proxy)
+            proxy["inboundApiKey"] = "";
+
+        if (node["network"] is JsonObject network)
+            network["customProxyUrl"] = "";
+
+        if (node["providers"] is JsonArray providers)
+        {
+            foreach (var providerNode in providers.OfType<JsonObject>())
+            {
+                providerNode["apiKey"] = "";
+                if (GetOAuthAccountsNode(providerNode) is JsonArray accounts)
+                {
+                    foreach (var accountNode in accounts.OfType<JsonObject>())
+                    {
+                        accountNode["accessToken"] = "";
+                        accountNode["refreshToken"] = "";
+                        accountNode["idToken"] = null;
+                    }
+                }
+            }
+        }
+
+        var serialized = node.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        var tempPath = _paths.ConfigPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(tempPath, serialized + Environment.NewLine, TextFileEncoding.Utf8NoBom);
+            ReplaceFileWithRetry(tempPath, _paths.ConfigPath);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    private void SaveConfigSnapshot()
+    {
+        if (!File.Exists(_paths.ConfigPath))
+            return;
+
+        var snapshotPath = Path.Combine(
+            _paths.ConfigBackupDirectory,
+            "config-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fff") + ".json");
+        try
+        {
+            var existing = File.ReadAllText(_paths.ConfigPath);
+            var sanitized = SanitizeConfigJson(existing);
+            File.WriteAllText(snapshotPath, sanitized + Environment.NewLine, TextFileEncoding.Utf8NoBom);
+            var checksum = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(snapshotPath)));
+            File.WriteAllText(
+                snapshotPath + ".sha256",
+                checksum + Environment.NewLine,
+                TextFileEncoding.Utf8NoBom);
+            var snapshots = Directory.EnumerateFiles(_paths.ConfigBackupDirectory, "config-*.json")
+                .OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase)
+                .Skip(20)
+                .ToArray();
+            foreach (var oldSnapshot in snapshots)
+            {
+                File.Delete(oldSnapshot);
+                if (File.Exists(oldSnapshot + ".sha256"))
+                    File.Delete(oldSnapshot + ".sha256");
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static JsonNode? GetOAuthAccountsNode(JsonObject provider)
+    {
+        return provider["oAuthAccounts"] ?? provider["oauthAccounts"];
+    }
+
+    private static string SanitizeConfigJson(string json)
+    {
+        try
+        {
+            var node = JsonNode.Parse(json)?.AsObject();
+            if (node is null)
+                return json;
+
+            if (node["proxy"] is JsonObject proxy)
+                proxy["inboundApiKey"] = "";
+
+            if (node["network"] is JsonObject network)
+                network["customProxyUrl"] = "";
+
+            if (node["providers"] is JsonArray providers)
+            {
+                foreach (var provider in providers.OfType<JsonObject>())
+                {
+                    provider["apiKey"] = "";
+                    if (GetOAuthAccountsNode(provider) is JsonArray accounts)
+                    {
+                        foreach (var account in accounts.OfType<JsonObject>())
+                        {
+                            account["accessToken"] = "";
+                            account["refreshToken"] = "";
+                            account["idToken"] = null;
+                        }
+                    }
+                }
+            }
+
+            return node.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (JsonException)
+        {
+            return "{\"redacted\":true}";
+        }
     }
 
     private static void EnsureRequiredBuiltIns(AppConfig config)

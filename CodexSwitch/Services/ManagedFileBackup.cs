@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+
 namespace CodexSwitch.Services;
 
 internal static class ManagedFileBackup
@@ -16,9 +19,43 @@ internal static class ManagedFileBackup
         return path + ".absent";
     }
 
+    public static string GetChecksumPath(string path)
+    {
+        return path + ".sha256";
+    }
+
+    public static string GetHistoryDirectory(string path)
+    {
+        return path + ".history";
+    }
+
     public static bool HasBackup(string path)
     {
         return File.Exists(GetBackupPath(path)) || File.Exists(GetAbsentMarkerPath(path));
+    }
+
+    public static IReadOnlyList<ManagedFileBackupEntry> ListHistory(string path)
+    {
+        var directory = GetHistoryDirectory(path);
+        if (!Directory.Exists(directory))
+            return [];
+
+        try
+        {
+            return Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly)
+                .Where(file => !file.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
+                .Select(file => new ManagedFileBackupEntry(
+                    file,
+                    File.Exists(file + ".sha256")
+                        ? File.ReadAllText(file + ".sha256").Trim()
+                        : null))
+                .OrderByDescending(entry => entry.Path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     /// <summary>
@@ -39,9 +76,16 @@ internal static class ManagedFileBackup
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         if (File.Exists(path))
+        {
+            CaptureHistory(path);
             File.Move(path, backupPath);
+            WriteChecksum(backupPath);
+        }
         else
+        {
             File.WriteAllText(absentPath, "");
+            CaptureAbsentHistory(path);
+        }
     }
 
     /// <summary>
@@ -57,8 +101,10 @@ internal static class ManagedFileBackup
 
         if (File.Exists(backupPath))
         {
+            VerifyChecksum(backupPath);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.Move(backupPath, path, overwrite: true);
+            DeleteIfExists(GetChecksumPath(backupPath));
             if (File.Exists(absentPath))
                 File.Delete(absentPath);
             return;
@@ -86,6 +132,7 @@ internal static class ManagedFileBackup
         var backupPath = GetBackupPath(path);
         if (File.Exists(backupPath))
         {
+            VerifyChecksum(backupPath);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.Copy(backupPath, path, overwrite: true);
             return;
@@ -94,4 +141,50 @@ internal static class ManagedFileBackup
         if (File.Exists(GetAbsentMarkerPath(path)) && File.Exists(path))
             File.Delete(path);
     }
+
+    private static void CaptureHistory(string path)
+    {
+        var historyDirectory = GetHistoryDirectory(path);
+        Directory.CreateDirectory(historyDirectory);
+        var fileName = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture) +
+            "-" + Guid.NewGuid().ToString("N") + "-" + Path.GetFileName(path);
+        var destination = Path.Combine(historyDirectory, fileName);
+        File.Copy(path, destination, overwrite: false);
+        WriteChecksum(destination);
+    }
+
+    private static void CaptureAbsentHistory(string path)
+    {
+        var historyDirectory = GetHistoryDirectory(path);
+        Directory.CreateDirectory(historyDirectory);
+        var fileName = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture) +
+            "-" + Guid.NewGuid().ToString("N") + "-" + Path.GetFileName(path) + ".absent";
+        File.WriteAllText(Path.Combine(historyDirectory, fileName), "");
+    }
+
+    private static void WriteChecksum(string path)
+    {
+        var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+        File.WriteAllText(GetChecksumPath(path), hash + Environment.NewLine);
+    }
+
+    private static void VerifyChecksum(string path)
+    {
+        var checksumPath = GetChecksumPath(path);
+        if (!File.Exists(checksumPath))
+            return;
+
+        var expected = File.ReadAllText(checksumPath).Trim();
+        var actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+        if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The managed backup checksum does not match its contents.");
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        if (File.Exists(path))
+            File.Delete(path);
+    }
 }
+
+internal sealed record ManagedFileBackupEntry(string Path, string? Sha256);

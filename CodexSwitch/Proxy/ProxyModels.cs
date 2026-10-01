@@ -37,11 +37,51 @@ public sealed class ModelInfoResponse
     public string? DisplayName { get; set; }
 
     public string OwnedBy { get; set; } = "codexswitch";
+
+    [JsonPropertyName("capabilities")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ModelCapabilities? Capabilities { get; set; }
+}
+
+public sealed class ModelCapabilities
+{
+    [JsonPropertyName("context_window")]
+    public int ContextWindow { get; set; }
+
+    [JsonPropertyName("reasoning_efforts")]
+    public string[] ReasoningEfforts { get; set; } = [];
+
+    [JsonPropertyName("vision")]
+    public bool Vision { get; set; }
+
+    [JsonPropertyName("tool_calls")]
+    public bool ToolCalls { get; set; }
+
+    [JsonPropertyName("pricing")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ModelPricingInfo? Pricing { get; set; }
+}
+
+public sealed class ModelPricingInfo
+{
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "USD";
+
+    [JsonPropertyName("input_per_million")]
+    public decimal? InputPerMillion { get; set; }
+
+    [JsonPropertyName("cached_input_per_million")]
+    public decimal? CachedInputPerMillion { get; set; }
+
+    [JsonPropertyName("output_per_million")]
+    public decimal? OutputPerMillion { get; set; }
 }
 
 public sealed class UsageLogRecord
 {
     public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
+
+    public string RequestId { get; set; } = "";
 
     public ClientAppKind ClientApp { get; set; } = ClientAppKind.Codex;
 
@@ -66,6 +106,14 @@ public sealed class UsageLogRecord
     public decimal EstimatedCost { get; set; }
 
     public long DurationMs { get; set; }
+
+    public long UpstreamDurationMs { get; set; }
+
+    public int RetryCount { get; set; }
+
+    public string FinalProvider { get; set; } = "";
+
+    public string ConversionStage { get; set; } = "";
 
     public int StatusCode { get; set; }
 

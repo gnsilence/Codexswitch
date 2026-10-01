@@ -11,6 +11,46 @@ namespace CodexSwitch.Tests;
 public sealed class OpenAiChatAdapterMessagesTests
 {
     [Fact]
+    public async Task HandleMessagesAsync_Gpt61SolUltraReasoningMapsToUpstreamMax()
+    {
+        using var requestDocument = JsonDocument.Parse(
+            """
+            {
+              "model": "claude-alias",
+              "reasoning_effort": "ultra",
+              "max_tokens": 64,
+              "messages": [
+                { "role": "user", "content": "Answer briefly." }
+              ]
+            }
+            """);
+
+        using var fixture = new AdapterFixture(
+            requestDocument,
+            """
+            {
+              "id": "chatcmpl-ultra",
+              "object": "chat.completion",
+              "model": "gpt-6.1-sol",
+              "choices": [
+                {
+                  "index": 0,
+                  "message": { "role": "assistant", "content": "Done." },
+                  "finish_reason": "stop"
+                }
+              ],
+              "usage": { "prompt_tokens": 1, "completion_tokens": 1 }
+            }
+            """);
+        fixture.Context.Model!.UpstreamModel = "gpt-6.1-sol";
+
+        await fixture.InvokeAsync();
+
+        using var upstream = JsonDocument.Parse(fixture.Handler.Requests[0].Body);
+        Assert.Equal("max", upstream.RootElement.GetProperty("reasoning_effort").GetString());
+    }
+
+    [Fact]
     public async Task HandleMessagesAsync_NonStreaming_ConvertsAnthropicMessagesToChatCompletions()
     {
         using var requestDocument = JsonDocument.Parse(

@@ -20,6 +20,32 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
 
     public ProviderProtocol Protocol => ProviderProtocol.AnthropicMessages;
 
+    public async Task<ProviderAdapterResult> HandleChatCompletionsAsync(
+        ProviderRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        byte[] payload;
+        try
+        {
+            payload = ChatCompletionsBridge.BuildResponsesRequest(context);
+        }
+        catch (ChatCompletionsBridge.ProtocolConversionException ex)
+        {
+            await ProtocolAdapterCommon.WriteJsonErrorAsync(
+                context.HttpContext,
+                HttpStatusCode.BadRequest,
+                ex.Message,
+                cancellationToken);
+            return ProviderAdapterResult.NonRetryableFailure(StatusCodes.Status400BadRequest, ex.Message);
+        }
+
+        return await ChatCompletionsBridge.ForwardResponsesAsync(
+            context,
+            payload,
+            HandleResponsesAsync,
+            cancellationToken);
+    }
+
     public async Task<ProviderAdapterResult> HandleResponsesAsync(ProviderRequestContext context, CancellationToken cancellationToken)
     {
         if (!ResponsesRequestContextParser.TryParse(

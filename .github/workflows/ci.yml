@@ -57,6 +57,10 @@ jobs:
       - name: Test
         run: dotnet test CodexSwitch.Tests/CodexSwitch.Tests.csproj -c Release --no-build --no-restore --verbosity normal
 
+      - name: Check whitespace
+        shell: bash
+        run: git diff --check
+
   publish:
     needs: verify
     strategy:
@@ -216,7 +220,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.name }}
-          path: ${{ steps.package.outputs.path }}
+          path: |
+            ${{ steps.package.outputs.path }}
+            ${{ steps.package.outputs.checksum }}
           if-no-files-found: error
 
   release:

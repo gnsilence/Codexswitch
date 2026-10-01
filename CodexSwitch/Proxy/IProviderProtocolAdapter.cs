@@ -8,6 +8,18 @@ public interface IProviderProtocolAdapter
 
     Task<ProviderAdapterResult> HandleResponsesAsync(ProviderRequestContext context, CancellationToken cancellationToken);
 
+    async Task<ProviderAdapterResult> HandleChatCompletionsAsync(
+        ProviderRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        await ProtocolAdapterCommon.WriteJsonErrorAsync(
+            context.HttpContext,
+            StatusCodes.Status501NotImplemented,
+            $"Provider protocol {Protocol} does not support /v1/chat/completions yet.",
+            cancellationToken);
+        return ProviderAdapterResult.NonRetryableFailure(StatusCodes.Status501NotImplemented);
+    }
+
     async Task<ProviderAdapterResult> HandleMessagesAsync(ProviderRequestContext context, CancellationToken cancellationToken)
     {
         await ProtocolAdapterCommon.WriteJsonErrorAsync(

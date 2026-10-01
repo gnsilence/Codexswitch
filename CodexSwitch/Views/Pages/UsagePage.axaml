@@ -163,12 +163,13 @@
                                             <TextBlock Text="{Binding Duration}" Classes="table-muted"/>
                                         </ui:CodexTableCell>
                                         <ui:CodexTableCell Grid.Column="10" MinWidth="64" Padding="6,6">
-                                            <Border Background="{Binding StatusBackground}"
-                                                    BorderBrush="{Binding StatusBorder}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6"
-                                                    Padding="6,3"
-                                                    HorizontalAlignment="Left">
+                                                <Border Background="{Binding StatusBackground}"
+                                                        BorderBrush="{Binding StatusBorder}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6"
+                                                        Padding="6,3"
+                                                        HorizontalAlignment="Left"
+                                                        ToolTip.Tip="{Binding Details}">
                                                 <TextBlock Text="{Binding Status}"
                                                            Foreground="{Binding StatusForeground}"
                                                            FontSize="12"

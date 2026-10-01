@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.0.9] - 2026-10-01
+
+### Added
+
+- Added a security and reliability baseline with Bearer authentication for local `/v1/*` APIs, cross-platform secret storage, encrypted configuration transfer, redacted diagnostics, and integrity-checked backups.
+- Added OpenAI-compatible `/v1/chat/completions` support and model capability metadata through `/v1/models`.
+- Added provider health checks, request correlation and upstream timing details, usage-log retention, and JSON/CSV export.
+
+### Changed
+
+- Added configurable upstream retry handling for Responses, Chat, Anthropic Messages, HTTP streaming, and Responses WebSocket fallback flows.
+- Added GPT-6.1 Sol, GPT-6 Sol, and GPT-6 Luna model capability, reasoning, pricing, and long-context support across provider catalogs, Codex synchronization, usage calculation, and logs.
+
+### Fixed
+
+- Prevented local configuration and backup files from retaining API keys, OAuth tokens, or credentials embedded in proxy URLs.
+- Preserved the previous installer after download failures and reject updates without a valid SHA-256 checksum.
+- Added configuration import rollback when applying an imported configuration fails.
+
 ## [v0.0.8] - 2026-09-30
 
 ### Added
@@ -12,11 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added GPT-6.1 Sol to built-in OpenAI, AIOSS, and RoutinAI provider model catalogs, with a one-time upgrade that preserves existing routes and default-model selections.
 - Added GPT-6.1 Sol short- and long-context pricing and Standard, Fast, Flex, and Batch rate rules. Batch pricing does not submit batch jobs.
 - Added GPT-6.1 Sol `max` reasoning support to the managed Codex model catalog, preserving the separate ordinary and 1M context modes.
+- Added inbound Bearer authentication for `/v1/*`, cross-platform secret storage, encrypted configuration transfer, redacted diagnostics, and integrity-checked configuration backups.
+- Added usage-log retention and JSON/CSV export controls, installer checksum verification with previous-download preservation, and manual Provider health checks.
 
 ### Changed
 
 - Made GPT-6.1 Sol model prices and usage estimates service-tier-aware while retaining existing pricing behavior for other models.
 - Recorded upstream service tiers in usage logs, with Chinese, English, and Japanese pricing hints.
+- Added request correlation, upstream timing, retry, Provider, and protocol-conversion details to usage logs and localized the related settings UI.
 
 ### Fixed
 

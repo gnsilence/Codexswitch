@@ -857,7 +857,13 @@ internal static class AnthropicMessagesToResponsesPayloadBuilder
 
         writer.WritePropertyName("reasoning");
         writer.WriteStartObject();
-        writer.WriteString("effort", mode.Effort);
+        writer.WriteString(
+            "effort",
+            ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                context.Provider,
+                context.Model,
+                ResponsesPayloadBuilder.ExtractRequestModel(context.RequestRoot),
+                mode.Effort));
         writer.WriteEndObject();
     }
 

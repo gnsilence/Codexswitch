@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Diagnostics;
 
 namespace CodexSwitch.Services;
 
@@ -72,6 +73,35 @@ public sealed class ProviderModelDiscoveryService
         }
     }
 
+    public async Task<ProviderHealthCheckResult> CheckHealthAsync(
+        ProviderConfig provider,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = Stopwatch.GetTimestamp();
+        try
+        {
+            var routes = await FetchRoutesAsync(provider, cancellationToken);
+            return ProviderHealthCheckResult.Success(
+                ElapsedMilliseconds(startedAt),
+                routes.Count);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return ProviderHealthCheckResult.Failure(
+                ElapsedMilliseconds(startedAt),
+                ex.Message);
+        }
+    }
+
+    private static long ElapsedMilliseconds(long startedAt)
+    {
+        return (long)(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+    }
+
     private async Task<HttpResponseMessage> SendModelsRequestAsync(
         ProviderConfig provider,
         string token,
@@ -125,5 +155,22 @@ public sealed class ProviderModelDiscoveryService
             return 3;
 
         return 4;
+    }
+}
+
+public sealed record ProviderHealthCheckResult(
+    bool IsHealthy,
+    long LatencyMs,
+    int ModelCount,
+    string? Error)
+{
+    public static ProviderHealthCheckResult Success(long latencyMs, int modelCount)
+    {
+        return new ProviderHealthCheckResult(true, latencyMs, modelCount, null);
+    }
+
+    public static ProviderHealthCheckResult Failure(long latencyMs, string error)
+    {
+        return new ProviderHealthCheckResult(false, latencyMs, 0, error);
     }
 }

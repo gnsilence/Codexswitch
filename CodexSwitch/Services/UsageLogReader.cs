@@ -20,6 +20,11 @@ public sealed class UsageLogReader
         return CreateSourceSnapshot(EnumerateAllLogFiles());
     }
 
+    public IEnumerable<UsageLogRecord> ReadAllRecords()
+    {
+        return ReadRecordsFromFiles(EnumerateAllLogFiles());
+    }
+
     public UsageLogSourceSnapshot GetSourceSnapshot(
         UsageTimeRange range,
         DateTimeOffset? now = null)

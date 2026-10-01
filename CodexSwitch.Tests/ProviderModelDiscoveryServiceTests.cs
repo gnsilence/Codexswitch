@@ -160,6 +160,71 @@ public sealed class ProviderModelDiscoveryServiceTests
         }
     }
 
+    [Fact]
+    public async Task CheckHealthAsync_ReturnsLatencyAndModelCount()
+    {
+        using var handler = new CaptureHandler("""{ "data": [{ "id": "gpt-6.1-sol" }] }""");
+        using var httpClient = new HttpClient(handler);
+        var root = CreateTempDirectory();
+        try
+        {
+            var config = new AppConfig();
+            var store = new ConfigurationStore(new AppPaths(root, Path.Combine(root, ".codex")));
+            var auth = new ProviderAuthService(store, config, httpClient);
+            var service = new ProviderModelDiscoveryService(httpClient, auth);
+
+            var result = await service.CheckHealthAsync(
+                new ProviderConfig
+                {
+                    BaseUrl = "https://aioss.cc/v1",
+                    ApiKey = "test-key",
+                    Protocol = ProviderProtocol.OpenAiResponses
+                },
+                CancellationToken.None);
+
+            Assert.True(result.IsHealthy);
+            Assert.Equal(1, result.ModelCount);
+            Assert.True(result.LatencyMs >= 0);
+            Assert.Null(result.Error);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ReturnsFailureWithoutThrowing()
+    {
+        using var handler = new CaptureHandler((HttpStatusCode.ServiceUnavailable, "upstream unavailable"));
+        using var httpClient = new HttpClient(handler);
+        var root = CreateTempDirectory();
+        try
+        {
+            var config = new AppConfig();
+            var store = new ConfigurationStore(new AppPaths(root, Path.Combine(root, ".codex")));
+            var auth = new ProviderAuthService(store, config, httpClient);
+            var service = new ProviderModelDiscoveryService(httpClient, auth);
+
+            var result = await service.CheckHealthAsync(
+                new ProviderConfig
+                {
+                    BaseUrl = "https://aioss.cc/v1",
+                    ApiKey = "test-key",
+                    Protocol = ProviderProtocol.OpenAiResponses
+                },
+                CancellationToken.None);
+
+            Assert.False(result.IsHealthy);
+            Assert.Contains("503", result.Error, StringComparison.Ordinal);
+            Assert.True(result.LatencyMs >= 0);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string CreateTempDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "codexswitch-tests-" + Guid.NewGuid().ToString("N"));

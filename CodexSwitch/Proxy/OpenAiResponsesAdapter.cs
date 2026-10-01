@@ -24,6 +24,32 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
 
     public ProviderProtocol Protocol => ProviderProtocol.OpenAiResponses;
 
+    public async Task<ProviderAdapterResult> HandleChatCompletionsAsync(
+        ProviderRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        byte[] payload;
+        try
+        {
+            payload = ChatCompletionsBridge.BuildResponsesRequest(context);
+        }
+        catch (ChatCompletionsBridge.ProtocolConversionException ex)
+        {
+            await WriteJsonErrorAsync(
+                context.HttpContext,
+                HttpStatusCode.BadRequest,
+                ex.Message,
+                cancellationToken);
+            return ProviderAdapterResult.NonRetryableFailure(StatusCodes.Status400BadRequest, ex.Message);
+        }
+
+        return await ChatCompletionsBridge.ForwardResponsesAsync(
+            context,
+            payload,
+            HandleResponsesAsync,
+            cancellationToken);
+    }
+
     public async Task<ProviderAdapterResult> HandleResponsesAsync(ProviderRequestContext context, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -1317,40 +1343,20 @@ public sealed class OpenAiResponsesAdapter : IProviderProtocolAdapter
         string? responseModel,
         string? error)
     {
-        var billedModel = string.IsNullOrWhiteSpace(responseModel) ? requestModel : responseModel;
-        var serviceTier = context.ResolveBillingServiceTier();
-        var cost = context.PriceCalculator.Calculate(billedModel, usage, context.CostSettings, serviceTier);
-        return new UsageLogRecord
-        {
-            Timestamp = DateTimeOffset.UtcNow,
-            ClientApp = context.ClientApp,
-            ProviderId = context.Provider.Id,
-            Protocol = (context.Model?.Protocol ?? context.Provider.Protocol).ToString(),
-            RequestModel = requestModel,
-            BilledModel = billedModel,
-            Stream = stream,
-            FastMode = context.CostSettings.FastMode,
-            ServiceTier = serviceTier,
-            Usage = usage,
-            CostMultiplier = cost.Multiplier,
-            EstimatedCost = cost.Total,
-            DurationMs = durationMs,
-            StatusCode = statusCode,
-            Error = statusCode >= 400 ? TruncateError(error) : null
-        };
+        return ProtocolAdapterCommon.CreateRecord(
+            context,
+            requestModel,
+            stream,
+            statusCode,
+            durationMs,
+            usage,
+            responseModel,
+            error);
     }
 
     private static void Record(ProviderRequestContext context, UsageLogRecord record)
     {
         ProtocolAdapterCommon.Record(context, record);
-    }
-
-    private static string? TruncateError(string? error)
-    {
-        if (string.IsNullOrWhiteSpace(error))
-            return null;
-
-        return error.Length <= 1_000 ? error : error[..1_000];
     }
 
     private static Task WriteJsonErrorAsync(

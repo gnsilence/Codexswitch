@@ -384,13 +384,13 @@ public sealed class CodexConfigWriterTests : IDisposable
     [Theory]
     [InlineData("gpt-6.1-sol", false)]
     [InlineData("gpt-6.1-sol-2026-09-30", true)]
-    public void Apply_Gpt61SolSupportsMaxAndPreservesContextMode(string modelId, bool oneMillionContext)
+    public void Apply_Gpt61SolSupportsUltraAndPreservesContextMode(string modelId, bool oneMillionContext)
     {
         var paths = new AppPaths(
             Path.Combine(_tempDirectory, modelId, "appdata"),
             Path.Combine(_tempDirectory, modelId, "codex"));
         Directory.CreateDirectory(paths.CodexDirectory);
-        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"max\"\n");
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"ultra\"\n");
         new CodexConfigWriter(paths).Apply(new AppConfig
         {
             ActiveCodexProviderId = "gpt61",
@@ -411,11 +411,11 @@ public sealed class CodexConfigWriterTests : IDisposable
         var entry = catalog.RootElement.GetProperty("models").EnumerateArray()
             .Single(model => model.GetProperty("slug").GetString() == modelId);
         Assert.Equal(
-            ["low", "medium", "high", "xhigh", "max"],
+            ["low", "medium", "high", "xhigh", "max", "ultra"],
             entry.GetProperty("supported_reasoning_levels").EnumerateArray()
                 .Select(level => level.GetProperty("effort").GetString() ?? "").ToArray());
         Assert.Equal(oneMillionContext ? 1_000_000 : 272_000, entry.GetProperty("context_window").GetInt32());
-        Assert.Contains("model_reasoning_effort = \"max\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+        Assert.Contains("model_reasoning_effort = \"ultra\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
     }
 
     [Fact]

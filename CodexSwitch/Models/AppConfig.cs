@@ -39,6 +39,8 @@ public sealed class AppUiSettings
 
     public bool AutoUpdateCheckEnabled { get; set; } = true;
 
+    public int UsageLogRetentionDays { get; set; } = 30;
+
     public double? MiniStatusLeft { get; set; }
 
     public double? MiniStatusTop { get; set; }
@@ -58,7 +60,7 @@ public sealed class ProxySettings
 
     public int Port { get; set; } = 12785;
 
-    public string InboundApiKey { get; set; } = "sk-codex";
+    public string InboundApiKey { get; set; } = "";
 
     public bool PreserveCodexAppAuth { get; set; }
 

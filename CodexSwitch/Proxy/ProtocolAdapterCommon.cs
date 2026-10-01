@@ -30,6 +30,7 @@ public static class ProtocolAdapterCommon
         return new UsageLogRecord
         {
             Timestamp = DateTimeOffset.UtcNow,
+            RequestId = context.RequestId,
             ClientApp = context.ClientApp,
             ProviderId = context.Provider.Id,
             Protocol = (context.Model?.Protocol ?? context.Provider.Protocol).ToString(),
@@ -42,8 +43,12 @@ public static class ProtocolAdapterCommon
             CostMultiplier = cost.Multiplier,
             EstimatedCost = cost.Total,
             DurationMs = durationMs,
+            UpstreamDurationMs = durationMs,
+            RetryCount = context.RetryAttempt,
+            FinalProvider = context.Provider.Id,
+            ConversionStage = context.ConversionStage,
             StatusCode = statusCode,
-            Error = statusCode >= 400 ? TruncateError(error) : null
+            Error = statusCode >= 400 ? RedactSensitiveError(context, error) : null
         };
     }
 
@@ -307,6 +312,28 @@ public static class ProtocolAdapterCommon
         return error.Length <= 1_000 ? error : error[..1_000];
     }
 
+    private static string? RedactSensitiveError(ProviderRequestContext context, string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+            return null;
+
+        var sanitized = error;
+        foreach (var secret in new[]
+                 {
+                     context.Provider.ApiKey,
+                     context.AccessToken,
+                     context.AppConfig.Proxy.InboundApiKey
+                 })
+        {
+            if (string.IsNullOrWhiteSpace(secret))
+                continue;
+
+            sanitized = sanitized.Replace(secret, "[redacted]", StringComparison.Ordinal);
+        }
+
+        return TruncateError(sanitized);
+    }
+
     public static string ResolveUpstreamModel(ProviderConfig provider, ModelRouteConfig? model)
     {
         if (!string.IsNullOrWhiteSpace(model?.UpstreamModel))
@@ -316,6 +343,50 @@ public static class ProtocolAdapterCommon
             return provider.DefaultModel;
 
         return "";
+    }
+
+    public static string? NormalizeReasoningEffortForUpstream(
+        ProviderConfig provider,
+        ModelRouteConfig? model,
+        string? requestModel,
+        string? reasoningEffort)
+    {
+        if (string.IsNullOrWhiteSpace(reasoningEffort) ||
+            !string.Equals(reasoningEffort, "ultra", StringComparison.OrdinalIgnoreCase))
+        {
+            return reasoningEffort;
+        }
+
+        var upstreamModel = ResolveEffectiveUpstreamModel(provider, model, requestModel);
+        return IsGpt61SolModel(upstreamModel)
+            ? "max"
+            : reasoningEffort;
+    }
+
+    private static string? ResolveEffectiveUpstreamModel(
+        ProviderConfig provider,
+        ModelRouteConfig? model,
+        string? requestModel)
+    {
+        if (!string.IsNullOrWhiteSpace(model?.UpstreamModel))
+            return model.UpstreamModel;
+
+        if (provider.OverrideRequestModel && !string.IsNullOrWhiteSpace(provider.DefaultModel))
+            return provider.DefaultModel;
+
+        if (!string.IsNullOrWhiteSpace(requestModel))
+            return requestModel;
+
+        if (!string.IsNullOrWhiteSpace(model?.Id))
+            return model.Id;
+
+        return provider.DefaultModel;
+    }
+
+    private static bool IsGpt61SolModel(string? modelId)
+    {
+        return !string.IsNullOrWhiteSpace(modelId) &&
+            modelId.StartsWith("gpt-6.1-sol", StringComparison.OrdinalIgnoreCase);
     }
 
     public static void WriteServiceTierProperty(

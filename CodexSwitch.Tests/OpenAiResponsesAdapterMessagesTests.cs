@@ -11,6 +11,51 @@ namespace CodexSwitch.Tests;
 public sealed class OpenAiResponsesAdapterMessagesTests
 {
     [Fact]
+    public async Task HandleMessagesAsync_Gpt61SolUltraReasoningMapsToUpstreamMax()
+    {
+        using var requestDocument = JsonDocument.Parse(
+            """
+            {
+              "model": "gpt-6.1-sol",
+              "reasoning": { "effort": "ultra" },
+              "max_tokens": 64,
+              "messages": [
+                { "role": "user", "content": "Answer briefly." }
+              ]
+            }
+            """);
+
+        using var fixture = new AdapterFixture(
+            requestDocument,
+            """
+            {
+              "id": "resp-ultra",
+              "object": "response",
+              "status": "completed",
+              "model": "gpt-6.1-sol",
+              "output": [
+                {
+                  "id": "msg-ultra",
+                  "type": "message",
+                  "role": "assistant",
+                  "content": [{ "type": "output_text", "text": "Done." }]
+                }
+              ],
+              "usage": { "input_tokens": 1, "output_tokens": 1 }
+            }
+            """,
+            modelId: "gpt-6.1-sol",
+            upstreamModel: "gpt-6.1-sol",
+            providerDisplayName: "GPT-6.1 Sol Responses",
+            providerDefaultModel: "gpt-6.1-sol");
+
+        await fixture.InvokeAsync();
+
+        using var upstream = JsonDocument.Parse(fixture.Handler.Requests[0].Body);
+        Assert.Equal("max", upstream.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+    }
+
+    [Fact]
     public async Task HandleMessagesAsync_NonStreaming_ConvertsAnthropicMessagesToResponses()
     {
         using var requestDocument = JsonDocument.Parse(

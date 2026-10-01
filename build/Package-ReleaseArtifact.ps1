@@ -452,7 +452,12 @@ $artifactPath = switch ($RuntimeIdentifier) {
 }
 
 $artifactName = [System.IO.Path]::GetFileNameWithoutExtension($artifactPath)
+$hash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$checksumPath = "$artifactPath.sha256"
+Write-Utf8NoBomFile -Path $checksumPath -Value "$hash *$([System.IO.Path]::GetFileName($artifactPath))"
 Write-GitHubOutput -Name "name" -Value $artifactName
 Write-GitHubOutput -Name "path" -Value $artifactPath
+Write-GitHubOutput -Name "checksum" -Value $checksumPath
 
 Write-Host "Created release artifact: $artifactPath"
+Write-Host "Created SHA-256 manifest: $checksumPath"

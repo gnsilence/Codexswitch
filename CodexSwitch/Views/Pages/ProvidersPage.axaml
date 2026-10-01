@@ -258,6 +258,13 @@
                                                        MaxWidth="170"
                                                        TextTrimming="CharacterEllipsis"/>
                                         </ui:CodexBadge>
+                                        <ui:CodexBadge Variant="Secondary"
+                                                       Padding="7,2"
+                                                       IsVisible="{Binding HasHealthInfo}"
+                                                       ToolTip.Tip="{Binding HealthToolTip}">
+                                            <TextBlock Text="{Binding HealthSummary}"
+                                                       FontSize="11"/>
+                                        </ui:CodexBadge>
                                     </StackPanel>
                                 </ui:CodexProviderCard.Status>
                                 <ui:CodexProviderCard.Usage>
@@ -303,7 +310,7 @@
                                 <ui:CodexProviderCard.Actions>
                                     <Grid Classes="provider-actions"
                                           Width="208"
-                                          ColumnDefinitions="*,*,*,*"
+                                          ColumnDefinitions="*,*,*,*,*"
                                           HorizontalAlignment="Right"
                                           VerticalAlignment="Center">
                                         <ui:CodexIconButton Grid.Column="0"
@@ -316,6 +323,14 @@
                                             <lucide:LucideIcon Kind="RefreshCw" Size="16" StrokeWidth="2"/>
                                         </ui:CodexIconButton>
                                         <ui:CodexIconButton Grid.Column="1"
+                                                            Classes="provider-action-button"
+                                                            Command="{Binding CheckHealthCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip.Tip="{i18n:Tr providers.health.check}"
+                                                            Variant="Ghost">
+                                            <lucide:LucideIcon Kind="Activity" Size="16" StrokeWidth="2"/>
+                                        </ui:CodexIconButton>
+                                        <ui:CodexIconButton Grid.Column="2"
                                                             Classes="provider-action-button provider-pin-button"
                                                             Command="{Binding TogglePinCommand}"
                                                             CommandParameter="{Binding}"
@@ -324,7 +339,7 @@
                                                             IsVisible="{Binding IsNotPinned}">
                                             <lucide:LucideIcon Kind="Pin" Size="16" StrokeWidth="2"/>
                                         </ui:CodexIconButton>
-                                        <ui:CodexIconButton Grid.Column="1"
+                                        <ui:CodexIconButton Grid.Column="2"
                                                             Classes="provider-action-button provider-pin-button"
                                                             Command="{Binding TogglePinCommand}"
                                                             CommandParameter="{Binding}"
@@ -333,7 +348,7 @@
                                                             IsVisible="{Binding IsPinned}">
                                             <lucide:LucideIcon Kind="PinOff" Size="16" StrokeWidth="2"/>
                                         </ui:CodexIconButton>
-                                        <ui:CodexIconButton Grid.Column="2"
+                                        <ui:CodexIconButton Grid.Column="3"
                                                             Classes="provider-action-button"
                                                             Command="{Binding EditCommand}"
                                                             CommandParameter="{Binding}"
@@ -341,7 +356,7 @@
                                                             Variant="Ghost">
                                             <lucide:LucideIcon Kind="Pencil" Size="16" StrokeWidth="2"/>
                                         </ui:CodexIconButton>
-                                        <ui:CodexPopover Grid.Column="3"
+                                        <ui:CodexPopover Grid.Column="4"
                                                          x:Name="DeleteProviderPopover"
                                                          Classes="provider-delete-popover"
                                                          Placement="Left"

@@ -24,7 +24,7 @@ public sealed class Gpt61SolUsageTests
     [InlineData(true, "flex", false, null, 0.7425)]
     [InlineData(true, null, true, null, 2.97)]
     [InlineData(true, null, false, "flex", 0.7425)]
-    public async Task HandleResponses_Gpt61SolLogsActualServiceTierAndPreservesMax(
+    public async Task HandleResponses_Gpt61SolMapsUltraToUpstreamMaxAndLogsActualServiceTier(
         bool stream, string? responseTier, bool fastMode, string? requestTier, double expectedCost)
     {
         var root = Path.Combine(Path.GetTempPath(), "CodexSwitchTests", Guid.NewGuid().ToString("N"));
@@ -69,7 +69,7 @@ public sealed class Gpt61SolUsageTests
                 input = "ping",
                 stream,
                 service_tier = requestTier,
-                reasoning = new { effort = "max" }
+                reasoning = new { effort = "ultra" }
             }));
             var httpContext = new DefaultHttpContext();
             httpContext.Response.Body = new MemoryStream();

@@ -26,7 +26,14 @@ public static class ResponsesPayloadBuilder
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .ToArray();
 
-        if (snapshot.IsObject && CanUseRawPayload(provider, model, costSettings, overrides, extraKeys))
+        if (snapshot.IsObject &&
+            CanUseRawPayload(
+                snapshot.RootElement,
+                provider,
+                model,
+                costSettings,
+                overrides,
+                extraKeys))
             return snapshot.BodyBytes;
 
         var omitKeys = overrides?.OmitBodyKeys
@@ -58,6 +65,8 @@ public static class ResponsesPayloadBuilder
                 var propertyName = reader.GetString() ?? "";
                 var isModel = reader.ValueTextEquals("model"u8);
                 var isServiceTier = reader.ValueTextEquals("service_tier"u8);
+                var isReasoningEffort = reader.ValueTextEquals("reasoning_effort"u8);
+                var isReasoning = reader.ValueTextEquals("reasoning"u8);
                 var isStore = reader.ValueTextEquals("store"u8);
                 var isInstructions = reader.ValueTextEquals("instructions"u8);
 
@@ -107,6 +116,43 @@ public static class ResponsesPayloadBuilder
                         WriteRawPropertyValue(writer, snapshot, propertyName, valueStart, reader);
                     }
 
+                    continue;
+                }
+
+                if (isReasoningEffort)
+                {
+                    SkipNestedValue(ref reader);
+                    var rawValue = snapshot.Body.Span.Slice(
+                        valueStart,
+                        checked((int)reader.BytesConsumed - valueStart));
+                    var effort = ReadStringValue(rawValue);
+                    if (effort is null)
+                    {
+                        writer.WritePropertyName(propertyName);
+                        writer.WriteRawValue(rawValue, skipInputValidation: true);
+                        continue;
+                    }
+
+                    writer.WriteString(
+                        propertyName,
+                        ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                            provider,
+                            model,
+                            snapshot.RequestModel,
+                            effort));
+                    continue;
+                }
+
+                if (isReasoning)
+                {
+                    SkipNestedValue(ref reader);
+                    writer.WritePropertyName(propertyName);
+                    WriteReasoningValue(
+                        writer,
+                        snapshot.Body.Span.Slice(valueStart, checked((int)reader.BytesConsumed - valueStart)),
+                        provider,
+                        model,
+                        snapshot.RequestModel);
                     continue;
                 }
 
@@ -188,6 +234,31 @@ public static class ResponsesPayloadBuilder
                 {
                     wroteServiceTier = true;
                     WriteServiceTier(writer, property.Name, provider, model, costSettings, property.Value);
+                    continue;
+                }
+
+                if (property.NameEquals("reasoning_effort") &&
+                    property.Value.ValueKind == JsonValueKind.String)
+                {
+                    writer.WriteString(
+                        property.Name,
+                        ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                            provider,
+                            model,
+                            ExtractRequestModel(root),
+                            property.Value.GetString()));
+                    continue;
+                }
+
+                if (property.NameEquals("reasoning") && property.Value.ValueKind == JsonValueKind.Object)
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteReasoningValue(
+                        writer,
+                        property.Value,
+                        provider,
+                        model,
+                        ExtractRequestModel(root));
                     continue;
                 }
 
@@ -275,6 +346,7 @@ public static class ResponsesPayloadBuilder
     }
 
     private static bool CanUseRawPayload(
+        JsonElement root,
         ProviderConfig provider,
         ModelRouteConfig? model,
         ProviderCostSettings costSettings,
@@ -285,7 +357,8 @@ public static class ResponsesPayloadBuilder
             ShouldForceFastTier(costSettings) ||
             !string.IsNullOrWhiteSpace(model?.ServiceTier) ||
             !string.IsNullOrWhiteSpace(provider.ServiceTier) ||
-            extraOmitKeys.Count > 0)
+            extraOmitKeys.Count > 0 ||
+            RequiresReasoningEffortRewrite(root, provider, model))
         {
             return false;
         }
@@ -294,6 +367,98 @@ public static class ResponsesPayloadBuilder
             (!overrides.ForceStoreFalse &&
              overrides.Instructions is null &&
              overrides.OmitBodyKeys.All(string.IsNullOrWhiteSpace));
+    }
+
+    private static bool RequiresReasoningEffortRewrite(
+        JsonElement root,
+        ProviderConfig provider,
+        ModelRouteConfig? model)
+    {
+        var requestModel = ExtractRequestModel(root);
+        if (root.TryGetProperty("reasoning_effort", out var reasoningEffort) &&
+            reasoningEffort.ValueKind == JsonValueKind.String &&
+            string.Equals(reasoningEffort.GetString(), "ultra", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                    provider,
+                    model,
+                    requestModel,
+                    reasoningEffort.GetString()),
+                "max",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return root.TryGetProperty("reasoning", out var reasoning) &&
+            reasoning.ValueKind == JsonValueKind.Object &&
+            reasoning.TryGetProperty("effort", out var effort) &&
+            effort.ValueKind == JsonValueKind.String &&
+            string.Equals(effort.GetString(), "ultra", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                    provider,
+                    model,
+                    requestModel,
+                    effort.GetString()),
+                "max",
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? ReadStringValue(ReadOnlySpan<byte> value)
+    {
+        using var document = JsonDocument.Parse(value.ToArray());
+        return document.RootElement.ValueKind == JsonValueKind.String
+            ? document.RootElement.GetString()
+            : null;
+    }
+
+    private static void WriteReasoningValue(
+        Utf8JsonWriter writer,
+        ReadOnlySpan<byte> rawValue,
+        ProviderConfig provider,
+        ModelRouteConfig? model,
+        string? requestModel)
+    {
+        using var document = JsonDocument.Parse(rawValue.ToArray());
+        WriteReasoningValue(writer, document.RootElement, provider, model, requestModel);
+    }
+
+    private static void WriteReasoningValue(
+        Utf8JsonWriter writer,
+        JsonElement value,
+        ProviderConfig provider,
+        ModelRouteConfig? model,
+        string? requestModel)
+    {
+        if (value.ValueKind != JsonValueKind.Object ||
+            !value.TryGetProperty("effort", out var effort) ||
+            effort.ValueKind != JsonValueKind.String)
+        {
+            value.WriteTo(writer);
+            return;
+        }
+
+        writer.WriteStartObject();
+        foreach (var property in value.EnumerateObject())
+        {
+            if (property.NameEquals("effort"))
+            {
+                writer.WriteString(
+                    property.Name,
+                    ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                        provider,
+                        model,
+                        requestModel,
+                        effort.GetString()));
+            }
+            else
+            {
+                property.WriteTo(writer);
+            }
+        }
+
+        writer.WriteEndObject();
     }
 
     private static void WriteRawPropertyValue(

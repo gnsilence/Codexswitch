@@ -38,6 +38,7 @@ public sealed class ProviderRequestContext
         UsageMeter = usageMeter;
         PriceCalculator = priceCalculator;
         UsageLogWriter = usageLogWriter;
+        RequestId = CreateRequestId(httpContext);
     }
 
     public ProviderRequestContext(
@@ -68,6 +69,7 @@ public sealed class ProviderRequestContext
         UsageMeter = usageMeter;
         PriceCalculator = priceCalculator;
         UsageLogWriter = usageLogWriter;
+        RequestId = CreateRequestId(httpContext);
     }
 
     public HttpContext HttpContext { get; }
@@ -102,6 +104,13 @@ public sealed class ProviderRequestContext
     public PriceCalculator PriceCalculator { get; }
 
     public UsageLogWriter UsageLogWriter { get; }
+
+    public string RequestId { get; }
+
+    public string ConversionStage =>
+        ClientApp == ClientAppKind.Codex
+            ? $"responses->{(Model?.Protocol ?? Provider.Protocol)}"
+            : $"messages->{(Model?.Protocol ?? Provider.Protocol)}";
 
     public string? ResponseServiceTier { get; set; }
 
@@ -248,6 +257,15 @@ public sealed class ProviderRequestContext
         return element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+    }
+
+    private static string CreateRequestId(HttpContext httpContext)
+    {
+        var trace = httpContext.TraceIdentifier;
+        if (string.IsNullOrWhiteSpace(trace))
+            trace = Guid.NewGuid().ToString("N");
+
+        return "cs_" + trace.Replace("-", "", StringComparison.Ordinal);
     }
 
     private sealed class HashingWriteStream(IncrementalHash hash) : Stream

@@ -242,21 +242,87 @@
                         <ui:CsText Text="{i18n:Tr settings.notes.releaseWorkflow}"
                                    Classes="muted"/>
                     </cui:CodexSection>
+                    <cui:CodexSection Title="{i18n:Tr settings.transfer.title}"
+                                      Description="{i18n:Tr settings.transfer.description}">
+                        <StackPanel Spacing="10">
+                            <cui:CodexField Label="{i18n:Tr settings.transfer.password}">
+                                <cui:CodexTextBox Text="{Binding ConfigurationTransferPassword}"
+                                                  PasswordChar="*"
+                                                  PlaceholderText="{i18n:Tr settings.transfer.passwordPlaceholder}"/>
+                            </cui:CodexField>
+                            <cui:CodexButton Variant="Outline"
+                                             Size="Small"
+                                             Command="{Binding ExportConfigurationCommand}"
+                                             Content="{i18n:Tr settings.transfer.export}"/>
+                            <cui:CodexField Label="{i18n:Tr settings.transfer.importPath}">
+                                <cui:CodexTextBox Text="{Binding ConfigurationImportPath}"
+                                                  PlaceholderText="{Binding ConfigurationBackupPath}"/>
+                            </cui:CodexField>
+                            <cui:CodexField Label="{i18n:Tr settings.transfer.importPassword}">
+                                <cui:CodexTextBox Text="{Binding ConfigurationImportPassword}"
+                                                  PasswordChar="*"
+                                                  PlaceholderText="{i18n:Tr settings.transfer.passwordPlaceholder}"/>
+                            </cui:CodexField>
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="8">
+                                <cui:CodexButton Variant="Outline"
+                                                 Size="Small"
+                                                 Command="{Binding ImportConfigurationCommand}"
+                                                 Content="{i18n:Tr settings.transfer.import}"/>
+                                <cui:CodexButton Variant="Outline"
+                                                 Size="Small"
+                                                 Command="{Binding ExportDiagnosticsCommand}"
+                                                 Content="{i18n:Tr settings.transfer.diagnostics}"/>
+                            </StackPanel>
+                            <ui:CsText Text="{Binding ConfigurationTransferStatus}"
+                                       Classes="muted"
+                                       TextWrapping="Wrap"/>
+                            <ui:CsText Text="{Binding SecretStorageWarning}"
+                                       Classes="muted"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </cui:CodexSection>
                 </StackPanel>
 
-                <cui:CodexSection Title="{i18n:Tr settings.usagePricing.title}"
-                                  Description="{i18n:Tr settings.usagePricing.description}"
-                                  IsVisible="{Binding IsUsageSettingsVisible}">
-                    <Grid ColumnDefinitions="0.8*,1*"
-                          ColumnSpacing="12">
-                        <cui:CodexField Label="{i18n:Tr settings.usagePricing.currency}">
-                            <cui:CodexTextBox Text="{Binding PricingCurrency}"/>
-                        </cui:CodexField>
-                        <cui:CodexField Grid.Column="1" Label="{i18n:Tr settings.usagePricing.billingUnit}">
-                            <cui:CodexTextBox Text="{Binding BillingUnitTokens}"/>
-                        </cui:CodexField>
-                    </Grid>
-                </cui:CodexSection>
+                <StackPanel IsVisible="{Binding IsUsageSettingsVisible}"
+                            Spacing="14">
+                    <cui:CodexSection Title="{i18n:Tr settings.usagePricing.title}"
+                                      Description="{i18n:Tr settings.usagePricing.description}">
+                        <Grid ColumnDefinitions="0.8*,1*"
+                              ColumnSpacing="12">
+                            <cui:CodexField Label="{i18n:Tr settings.usagePricing.currency}">
+                                <cui:CodexTextBox Text="{Binding PricingCurrency}"/>
+                            </cui:CodexField>
+                            <cui:CodexField Grid.Column="1" Label="{i18n:Tr settings.usagePricing.billingUnit}">
+                                <cui:CodexTextBox Text="{Binding BillingUnitTokens}"/>
+                            </cui:CodexField>
+                        </Grid>
+                    </cui:CodexSection>
+                    <cui:CodexSection Title="{i18n:Tr settings.usageLogs.title}"
+                                      Description="{i18n:Tr settings.usageLogs.description}">
+                        <StackPanel Spacing="10">
+                            <cui:CodexField Label="{i18n:Tr settings.usageLogs.retentionDays}">
+                                <cui:CodexTextBox Text="{Binding UsageLogRetentionDays}"/>
+                            </cui:CodexField>
+                            <ui:CsText Text="{Binding UsageLogStorageText}"
+                                       Classes="muted"/>
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="8">
+                                <cui:CodexButton Variant="Outline"
+                                                 Size="Small"
+                                                 Command="{Binding ExportUsageLogsJsonCommand}"
+                                                 Content="{i18n:Tr settings.usageLogs.exportJson}"/>
+                                <cui:CodexButton Variant="Outline"
+                                                 Size="Small"
+                                                 Command="{Binding ExportUsageLogsCsvCommand}"
+                                                 Content="{i18n:Tr settings.usageLogs.exportCsv}"/>
+                            </StackPanel>
+                            <ui:CsText Text="{Binding UsageLogMaintenanceStatus}"
+                                       Classes="muted"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </cui:CodexSection>
+                </StackPanel>
 
                 <StackPanel IsVisible="{Binding IsAboutSettingsVisible}"
                             Spacing="12">

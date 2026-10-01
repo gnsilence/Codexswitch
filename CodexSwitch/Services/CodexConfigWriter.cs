@@ -766,6 +766,7 @@ public sealed class CodexConfigWriter
     {
         return !string.IsNullOrWhiteSpace(modelId) &&
             (modelId.StartsWith("gpt-6-astra", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("gpt-6.1-sol", StringComparison.OrdinalIgnoreCase) ||
              modelId.StartsWith("gpt-6-sol", StringComparison.OrdinalIgnoreCase) ||
              modelId.StartsWith("gpt-6-luna", StringComparison.OrdinalIgnoreCase) ||
              modelId.StartsWith("gpt-5.6-sol", StringComparison.OrdinalIgnoreCase) ||
@@ -775,8 +776,7 @@ public sealed class CodexConfigWriter
     private static bool IsMaxReasoningModel(string? modelId)
     {
         return !string.IsNullOrWhiteSpace(modelId) &&
-            (modelId.StartsWith("gpt-5.6-luna", StringComparison.OrdinalIgnoreCase) ||
-             modelId.StartsWith("gpt-6.1-sol", StringComparison.OrdinalIgnoreCase));
+            modelId.StartsWith("gpt-5.6-luna", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsXHighReasoningModel(string? modelId)

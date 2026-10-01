@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using CodexSwitch.I18n;
 using CodexSwitch.Models;
 using CodexSwitch.Proxy;
+using CodexSwitch.Serialization;
 using CodexSwitch.Services;
 using CodexSwitchUI.Controls;
 using CodexSwitchUI.ECharts.Abstractions;
@@ -36,9 +37,11 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private readonly UsageMeter _usageMeter;
     private readonly UsageLogWriter _usageLogWriter;
     private readonly UsageLogReader _usageLogReader;
+    private readonly UsageLogMaintenanceService _usageLogMaintenanceService;
     private readonly CodexConfigWriter _codexConfigWriter;
     private readonly ClaudeCodeConfigWriter _claudeCodeConfigWriter;
     private readonly CodexSessionMigrationService _codexSessionMigrationService;
+    private readonly ConfigurationTransferService _configurationTransferService;
     private readonly I18nService _i18n;
     private readonly CodexDesktopClientLauncher _codexDesktopClientLauncher = new();
     private HttpClient _sharedHttpClient = null!;
@@ -56,9 +59,11 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private readonly DispatcherTimer _miniStatusTimer;
     private readonly Dictionary<string, ProviderUsageQueryResult> _providerUsageResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _refreshingUsageProviders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _checkingProviderHealth = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _refreshingCodexQuotaAccounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _iconEnsureRequests = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProviderUsageFailureState> _providerUsageFailures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ProviderHealthState> _providerHealthStates = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object BrushCacheSync = new();
     private static readonly Dictionary<string, IBrush> BrushCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly string[] UsageSharePalette =
@@ -381,6 +386,27 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private int _networkRetryBaseDelaySeconds = 1;
 
     [ObservableProperty]
+    private string _configurationTransferPassword = "";
+
+    [ObservableProperty]
+    private string _configurationImportPassword = "";
+
+    [ObservableProperty]
+    private string _configurationImportPath = "";
+
+    [ObservableProperty]
+    private string _configurationTransferStatus = "";
+
+    [ObservableProperty]
+    private int _usageLogRetentionDays = 30;
+
+    [ObservableProperty]
+    private string _usageLogStorageText = "";
+
+    [ObservableProperty]
+    private string _usageLogMaintenanceStatus = "";
+
+    [ObservableProperty]
     private bool _preserveCodexAppAuth;
 
     [ObservableProperty]
@@ -591,10 +617,12 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _usageMeter = new UsageMeter(_priceCalculator);
         _usageLogWriter = new UsageLogWriter(_paths);
         _usageLogReader = new UsageLogReader(_paths);
+        _usageLogMaintenanceService = new UsageLogMaintenanceService(_paths, _usageLogReader);
         _codexConfigWriter = new CodexConfigWriter(_paths);
         _claudeCodeConfigWriter = new ClaudeCodeConfigWriter(_paths);
         AppDomain.CurrentDomain.ProcessExit += OnProcessExitRestoreManagedConfigs;
         _codexSessionMigrationService = new CodexSessionMigrationService(_paths);
+        _configurationTransferService = new ConfigurationTransferService(_paths);
         _startupRegistrationService = new StartupRegistrationService();
         SyncStartupRegistrationFromConfig();
         CreateNetworkServices();
@@ -649,6 +677,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         PreviousUsageLogPageCommand = new RelayCommand(() => SelectUsageLogPage(UsageLogPage - 1));
         NextUsageLogPageCommand = new RelayCommand(() => SelectUsageLogPage(UsageLogPage + 1));
         SelectUsageLogPageCommand = new RelayCommand<int>(SelectUsageLogPage);
+        ExportUsageLogsJsonCommand = new AsyncRelayCommand(ExportUsageLogsJsonAsync);
+        ExportUsageLogsCsvCommand = new AsyncRelayCommand(ExportUsageLogsCsvAsync);
         SelectUsageFilterProviderCommand = new RelayCommand<string>(filter => SelectedUsageFilterProvider = NormalizeUsageFilterValue(filter));
         SelectUsageFilterModelCommand = new RelayCommand<string>(filter => SelectedUsageFilterModel = NormalizeUsageFilterValue(filter));
         SelectThemeCommand = new RelayCommand<string>(SelectTheme);
@@ -658,6 +688,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         StopProxyCommand = new AsyncRelayCommand(StopProxyAsync);
         SelectProviderCommand = new RelayCommand<ProviderListItem>(row => _ = ActivateProviderAsync(row));
         SyncProviderToCodexCommand = new AsyncRelayCommand<ProviderListItem>(SyncProviderToCodexAsync);
+        CheckProviderHealthCommand = new AsyncRelayCommand<ProviderListItem>(CheckProviderHealthAsync);
         ChangeProviderDefaultModelCommand = new RelayCommand<ProviderDefaultModelChange>(change => _ = ChangeProviderDefaultModelAsync(change));
         SelectClaudeCodeModelCommand = new RelayCommand<string>(SelectClaudeCodeModel);
         SaveClaudeCodeSettingsCommand = new AsyncRelayCommand(SaveClaudeCodeSettingsAsync);
@@ -706,6 +737,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         OpenLatestReleaseCommand = new RelayCommand(OpenLatestRelease);
         OpenDownloadedUpdateCommand = new RelayCommand(OpenDownloadedUpdate);
         OpenExternalUrlCommand = new RelayCommand<string>(OpenExternalUrl);
+        ExportConfigurationCommand = new AsyncRelayCommand(ExportConfigurationAsync);
+        ImportConfigurationCommand = new AsyncRelayCommand(ImportConfigurationAsync);
+        ExportDiagnosticsCommand = new AsyncRelayCommand(ExportDiagnosticsAsync);
 
         _usageMeter.Changed += (_, snapshot) => Dispatcher.UIThread.Post(() => ApplySnapshot(snapshot));
 
@@ -715,6 +749,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         RefreshProviderRows();
         RefreshCodexSessions();
         RefreshSettingsFields();
+        RefreshUsageLogStorageInfo();
         RefreshPricingRows();
         RefreshModelCatalogRows();
         SelectProvider(SelectedProviderRows.FirstOrDefault(row => row.IsActive) ?? SelectedProviderRows.FirstOrDefault());
@@ -829,6 +864,10 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public IRelayCommand<int> SelectUsageLogPageCommand { get; }
 
+    public IAsyncRelayCommand ExportUsageLogsJsonCommand { get; }
+
+    public IAsyncRelayCommand ExportUsageLogsCsvCommand { get; }
+
     public IRelayCommand<string> SelectUsageFilterProviderCommand { get; }
 
     public IRelayCommand<string> SelectUsageFilterModelCommand { get; }
@@ -846,6 +885,8 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     public IRelayCommand<ProviderListItem> SelectProviderCommand { get; }
 
     public IAsyncRelayCommand<ProviderListItem> SyncProviderToCodexCommand { get; }
+
+    public IAsyncRelayCommand<ProviderListItem> CheckProviderHealthCommand { get; }
 
     public IRelayCommand<ProviderDefaultModelChange> ChangeProviderDefaultModelCommand { get; }
 
@@ -942,6 +983,12 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     public IRelayCommand OpenDownloadedUpdateCommand { get; }
 
     public IRelayCommand<string> OpenExternalUrlCommand { get; }
+
+    public IAsyncRelayCommand ExportConfigurationCommand { get; }
+
+    public IAsyncRelayCommand ImportConfigurationCommand { get; }
+
+    public IAsyncRelayCommand ExportDiagnosticsCommand { get; }
 
     public async ValueTask DisposeAsync()
     {
@@ -1378,6 +1425,41 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         await RefreshUsageDashboardInBackgroundAsync(force: true, minimumBusyTime: TimeSpan.FromMilliseconds(420));
     }
 
+    private Task ExportUsageLogsJsonAsync()
+    {
+        return ExportUsageLogsAsync(
+            UsageLogsJsonExportPath,
+            static (service, path) => service.ExportJson(path),
+            "settings.usageLogs.jsonExported");
+    }
+
+    private Task ExportUsageLogsCsvAsync()
+    {
+        return ExportUsageLogsAsync(
+            UsageLogsCsvExportPath,
+            static (service, path) => service.ExportCsv(path),
+            "settings.usageLogs.csvExported");
+    }
+
+    private async Task ExportUsageLogsAsync(
+        string destinationPath,
+        Action<UsageLogMaintenanceService, string> export,
+        string messageKey)
+    {
+        try
+        {
+            export(_usageLogMaintenanceService, destinationPath);
+            UsageLogMaintenanceStatus = F(messageKey, destinationPath);
+            StatusMessage = UsageLogMaintenanceStatus;
+            await Task.CompletedTask;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            UsageLogMaintenanceStatus = F("settings.usageLogs.exportFailed", ex.Message);
+            StatusMessage = UsageLogMaintenanceStatus;
+        }
+    }
+
     private async Task SaveAsync()
     {
         await PersistSettingsAsync(T("status.settingsSaved"));
@@ -1386,6 +1468,148 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private async Task ApplyAsync()
     {
         await PersistSettingsAsync(T("status.settingsApplied"));
+    }
+
+    private Task ExportConfigurationAsync()
+    {
+        try
+        {
+            _configurationTransferService.Export(
+                _config,
+                _pricing,
+                ConfigurationTransferPassword,
+                ConfigurationBackupPath);
+            ConfigurationTransferStatus = F("settings.transfer.exported", ConfigurationBackupPath);
+            StatusMessage = ConfigurationTransferStatus;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or InvalidDataException)
+        {
+            ConfigurationTransferStatus = F("settings.transfer.failed", ex.Message);
+            StatusMessage = ConfigurationTransferStatus;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ExportDiagnosticsAsync()
+    {
+        try
+        {
+            _configurationTransferService.ExportDiagnostics(
+                _config,
+                _pricing,
+                _proxyHostService.State,
+                DiagnosticsExportPath);
+            ConfigurationTransferStatus = F("settings.transfer.diagnosticsExported", DiagnosticsExportPath);
+            StatusMessage = ConfigurationTransferStatus;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            ConfigurationTransferStatus = F("settings.transfer.failed", ex.Message);
+            StatusMessage = ConfigurationTransferStatus;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private async Task ImportConfigurationAsync()
+    {
+        var sourcePath = string.IsNullOrWhiteSpace(ConfigurationImportPath)
+            ? ConfigurationBackupPath
+            : ConfigurationImportPath.Trim();
+        var oldConfig = _config;
+        var oldPricing = ClonePricing(_pricing);
+        var changed = false;
+
+        try
+        {
+            var imported = _configurationTransferService.Import(sourcePath, ConfigurationImportPassword);
+            ConfigurationStore.EnsureValidDefaults(imported.Config);
+
+            changed = true;
+            await _proxyHostService.StopAsync();
+            _config = imported.Config;
+            CopyPricing(_pricing, imported.Pricing);
+            _store.SaveConfig(_config);
+            _store.SavePricing(_pricing);
+            _i18n.SetLanguage(_config.Ui.Language);
+            await RecreateNetworkServicesAsync();
+            RefreshSettingsFields();
+            RefreshProviderRows();
+            RefreshModelCatalogRows();
+            RefreshClientApps();
+            if (_config.Proxy.Enabled)
+                await RestartProxyAsync();
+
+            ConfigurationTransferStatus = F("settings.transfer.imported", sourcePath);
+            StatusMessage = ConfigurationTransferStatus;
+        }
+        catch (Exception ex)
+        {
+            if (changed)
+            {
+                try
+                {
+                    _config = oldConfig;
+                    CopyPricing(_pricing, oldPricing);
+                    _store.SaveConfig(_config);
+                    _store.SavePricing(_pricing);
+                    await RecreateNetworkServicesAsync();
+                    RefreshSettingsFields();
+                    RefreshProviderRows();
+                    RefreshModelCatalogRows();
+                    RefreshClientApps();
+                    if (_config.Proxy.Enabled)
+                        await RestartProxyAsync();
+                }
+                catch (Exception rollbackException)
+                {
+                    ex = new InvalidOperationException(
+                        ex.Message + " " + F("settings.transfer.rollbackFailed", rollbackException.Message),
+                        ex);
+                }
+            }
+
+            ConfigurationTransferStatus = F("settings.transfer.failed", ex.Message);
+            StatusMessage = ConfigurationTransferStatus;
+        }
+    }
+
+    private static string ConfigurationDocumentsDirectory =>
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+    public string ConfigurationBackupPath => Path.Combine(
+        ConfigurationDocumentsDirectory,
+        "CodexSwitch-Backup.csx");
+
+    public string DiagnosticsExportPath => Path.Combine(
+        ConfigurationDocumentsDirectory,
+        "CodexSwitch-Diagnostics.zip");
+
+    public bool IsSecretStorageFallback => _store.IsUsingFallbackSecretStorage;
+
+    public string SecretStorageWarning => IsSecretStorageFallback
+        ? T("settings.transfer.fallbackWarning")
+        : "";
+
+    private static ModelPricingCatalog ClonePricing(ModelPricingCatalog source)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(
+            source,
+            CodexSwitchJsonContext.Default.ModelPricingCatalog);
+        return JsonSerializer.Deserialize(
+                   bytes,
+                   CodexSwitchJsonContext.Default.ModelPricingCatalog) ??
+            new ModelPricingCatalog();
+    }
+
+    private static void CopyPricing(ModelPricingCatalog target, ModelPricingCatalog source)
+    {
+        target.SchemaVersion = source.SchemaVersion;
+        target.Currency = source.Currency;
+        target.BillingUnitTokens = source.BillingUnitTokens;
+        target.FastMode = source.FastMode;
+        target.Models = source.Models;
     }
 
     private async Task CheckForUpdatesAsync(bool silent)
@@ -1550,11 +1774,13 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         _config.Ui.MiniStatusEnabled = MiniStatusEnabled;
         _config.Ui.AutoUpdateCheckEnabled = AutoUpdateCheckEnabled;
         _config.Ui.DefaultApp = DefaultClientAppIsCodex ? ClientAppKind.Codex : ClientAppKind.ClaudeCode;
+        _config.Ui.UsageLogRetentionDays = NormalizeUsageLogRetentionDays(UsageLogRetentionDays);
 
         _pricing.BillingUnitTokens = BillingUnitTokens <= 0 ? 1_000_000 : BillingUnitTokens;
 
         _store.SaveConfig(_config);
         _store.SavePricing(_pricing);
+        var deletedLogs = _usageLogMaintenanceService.Prune(_config.Ui.UsageLogRetentionDays);
         AppThemeService.Apply(_config.Ui.Theme);
         if (networkChanged)
             await RecreateNetworkServicesAsync();
@@ -1564,6 +1790,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             await RestartProxyAsync();
         else
             await StopProxyAsync();
+        RefreshUsageLogStorageInfo();
+        if (deletedLogs > 0)
+            UsageLogMaintenanceStatus = F("settings.usageLogs.pruned", deletedLogs);
         StatusMessage = startupStatusMessage ?? successMessage;
     }
 
@@ -1575,6 +1804,11 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private static int NormalizeMaxRetries(int value)
     {
         return Math.Clamp(value, 0, 5);
+    }
+
+    private static int NormalizeUsageLogRetentionDays(int value)
+    {
+        return Math.Clamp(value, 1, 3650);
     }
 
     private static int NormalizeRetryBaseDelaySeconds(int value)
@@ -1704,6 +1938,42 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         SelectProvider(FindProviderRow(row.ClientApp, row.Id));
         if (_config.Proxy.Enabled)
             await ReloadProxyConfigAsync();
+    }
+
+    private async Task CheckProviderHealthAsync(ProviderListItem? row)
+    {
+        if (row is null ||
+            !_checkingProviderHealth.Add(row.Id))
+        {
+            return;
+        }
+
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(RefreshProviderRows);
+            var provider = _config.Providers.FirstOrDefault(item =>
+                string.Equals(item.Id, row.Id, StringComparison.OrdinalIgnoreCase));
+            if (provider is null)
+                return;
+
+            var result = await _providerModelDiscoveryService.CheckHealthAsync(
+                provider,
+                CancellationToken.None);
+            _providerHealthStates[provider.Id] = new ProviderHealthState(
+                result.IsHealthy,
+                result.LatencyMs,
+                result.ModelCount,
+                result.Error,
+                result.IsHealthy ? null : DateTimeOffset.UtcNow);
+            StatusMessage = result.IsHealthy
+                ? F("providers.health.ok", result.LatencyMs)
+                : F("providers.health.failed", result.Error ?? T("providers.health.unknown"));
+        }
+        finally
+        {
+            _checkingProviderHealth.Remove(row.Id);
+            await Dispatcher.UIThread.InvokeAsync(RefreshProviderRows);
+        }
     }
 
     private async Task SyncProviderToCodexAsync(ProviderListItem? row)
@@ -3524,6 +3794,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         var iconSlug = ResolveProviderIconSlug(provider);
         var activeAccount = ResolveUsageAccount(provider, null);
         var usage = CreateProviderUsageDisplay(provider, activeAccount);
+        var health = _providerHealthStates.TryGetValue(provider.Id, out var healthState)
+            ? healthState
+            : null;
         var activeId = kind == ClientAppKind.Codex ? _config.ActiveCodexProviderId : _config.ActiveClaudeCodeProviderId;
         var defaultModel = ResolveProviderRowDefaultModel(provider, kind);
         var activeAccountSummary = provider.AuthMode == ProviderAuthMode.OAuth
@@ -3562,11 +3835,15 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             IsUsageRefreshing = usage.IsRefreshing,
             IsUsageError = usage.IsError,
             IsUsageValid = usage.IsValid,
+            HealthSummary = CreateProviderHealthSummary(health, provider.Id),
+            HealthToolTip = CreateProviderHealthToolTip(health),
+            HasHealthInfo = health is not null || _checkingProviderHealth.Contains(provider.Id),
             IsActive = string.Equals(provider.Id, activeId, StringComparison.OrdinalIgnoreCase),
             IsSelected = string.Equals(provider.Id, SelectedProviderId, StringComparison.OrdinalIgnoreCase),
             IsPinned = provider.IsPinned,
             SelectCommand = SelectProviderCommand,
             SyncToCodexCommand = SyncProviderToCodexCommand,
+            CheckHealthCommand = CheckProviderHealthCommand,
             ChangeDefaultModelCommand = ChangeProviderDefaultModelCommand,
             TogglePinCommand = ToggleProviderPinCommand,
             EditCommand = EditProviderCommand,
@@ -3606,6 +3883,28 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         }
 
         return row;
+    }
+
+    private string CreateProviderHealthSummary(ProviderHealthState? state, string providerId)
+    {
+        if (_checkingProviderHealth.Contains(providerId))
+            return T("providers.health.checking");
+        if (state is null)
+            return "";
+        return state.IsHealthy
+            ? F("providers.health.healthy", state.LatencyMs)
+            : T("providers.health.failedShort");
+    }
+
+    private string CreateProviderHealthToolTip(ProviderHealthState? state)
+    {
+        if (state is null)
+            return T("providers.health.notChecked");
+        if (state.IsHealthy)
+            return F("providers.health.details", state.LatencyMs, state.ModelCount);
+        return F(
+            "providers.health.error",
+            state.Error ?? T("providers.health.unknown")) + " " + T("providers.health.suggestSwitch");
     }
 
     private static string ResolveProviderRowDefaultModel(ProviderConfig provider, ClientAppKind kind)
@@ -4182,6 +4481,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
             AutoUpdateCheckEnabled = _config.Ui.AutoUpdateCheckEnabled;
             SelectedClientApp = _config.Ui.DefaultApp;
             DefaultClientAppIsCodex = _config.Ui.DefaultApp == ClientAppKind.Codex;
+            UsageLogRetentionDays = NormalizeUsageLogRetentionDays(_config.Ui.UsageLogRetentionDays);
             BillingUnitTokens = _pricing.BillingUnitTokens;
             PricingCurrency = string.IsNullOrWhiteSpace(_pricing.Currency) ? "USD" : _pricing.Currency;
             RefreshClientApps();
@@ -5826,6 +6126,24 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
 
     public string UsageLogFilePath => _paths.UsageLogDirectory;
 
+    public string UsageLogsJsonExportPath => Path.Combine(
+        ConfigurationDocumentsDirectory,
+        "CodexSwitch-UsageLogs.json");
+
+    public string UsageLogsCsvExportPath => Path.Combine(
+        ConfigurationDocumentsDirectory,
+        "CodexSwitch-UsageLogs.csv");
+
+    private void RefreshUsageLogStorageInfo()
+    {
+        var info = _usageLogMaintenanceService.GetStorageInfo();
+        UsageLogStorageText = F(
+            "settings.usageLogs.storage",
+            info.FileCount,
+            DisplayFormatters.FormatByteCount(info.Bytes));
+        OnPropertyChanged(nameof(UsageLogStorageText));
+    }
+
     public bool IsProxyAlert => !_config.Proxy.Enabled ||
         _proxyHostService.State.Error is not null ||
         (!_proxyHostService.State.IsRunning &&
@@ -5997,9 +6315,17 @@ public sealed partial class ProviderListItem : ObservableObject
 
     public bool IsUsageValid { get; set; }
 
+    public string HealthSummary { get; set; } = "";
+
+    public string HealthToolTip { get; set; } = "";
+
+    public bool HasHealthInfo { get; set; }
+
     public IRelayCommand<ProviderListItem>? SelectCommand { get; init; }
 
     public IAsyncRelayCommand<ProviderListItem>? SyncToCodexCommand { get; init; }
+
+    public IAsyncRelayCommand<ProviderListItem>? CheckHealthCommand { get; init; }
 
     public IRelayCommand<ProviderDefaultModelChange>? ChangeDefaultModelCommand { get; init; }
 
@@ -6072,6 +6398,13 @@ public sealed record ProviderUsageDisplay(
 }
 
 public sealed record ProviderUsageQueryTarget(string ProviderId, string? AccountId);
+
+public sealed record ProviderHealthState(
+    bool IsHealthy,
+    long LatencyMs,
+    int ModelCount,
+    string? Error,
+    DateTimeOffset? LastFailureAt);
 
 public sealed class ProviderUsageFailureState
 {
@@ -6398,6 +6731,8 @@ public sealed class UsageLogItem
 
     public string Duration { get; init; } = "";
 
+    public string Details { get; init; } = "";
+
     public string Status { get; init; } = "";
 
     public IBrush StatusForeground { get; init; } = SuccessStatusForeground;
@@ -6423,6 +6758,19 @@ public sealed class UsageLogItem
             Cost = DisplayFormatters.FormatCost(record.EstimatedCost),
             ServiceTier = record.ServiceTier ?? (record.FastMode ? "priority" : "default"),
             Duration = record.DurationMs + "ms",
+            Details = string.Join(
+                Environment.NewLine,
+                new[]
+                {
+                    string.IsNullOrWhiteSpace(record.RequestId) ? null : "Request: " + record.RequestId,
+                    "Retries: " + record.RetryCount.ToString(CultureInfo.InvariantCulture),
+                    string.IsNullOrWhiteSpace(record.FinalProvider) ? null : "Provider: " + record.FinalProvider,
+                    string.IsNullOrWhiteSpace(record.ConversionStage) ? null : "Stage: " + record.ConversionStage,
+                    record.UpstreamDurationMs > 0
+                        ? "Upstream: " + record.UpstreamDurationMs.ToString(CultureInfo.InvariantCulture) + "ms"
+                        : null,
+                    string.IsNullOrWhiteSpace(record.Error) ? null : record.Error
+                }.Where(item => item is not null)!),
             Status = record.StatusCode.ToString(CultureInfo.InvariantCulture),
             StatusForeground = failed ? FailedStatusForeground : SuccessStatusForeground,
             StatusBackground = failed ? FailedStatusBackground : SuccessStatusBackground,

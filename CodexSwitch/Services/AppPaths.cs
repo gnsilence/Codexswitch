@@ -11,6 +11,10 @@ public sealed class AppPaths
         Directory.CreateDirectory(root);
         RootDirectory = root;
         ConfigPath = Path.Combine(root, "config.json");
+        SecretsPath = Path.Combine(root, "secrets.v1.json");
+        SecretKeyPath = Path.Combine(root, "secrets.key");
+        SecretKeyProtectedPath = Path.Combine(root, "secrets.key.dpapi");
+        ConfigBackupDirectory = Path.Combine(root, "config-backups");
         PricingPath = Path.Combine(root, "model-pricing.json");
         UsageLogPath = Path.Combine(root, "usage-log.jsonl");
         UsageLogDirectory = Path.Combine(root, "usage-logs");
@@ -19,6 +23,7 @@ public sealed class AppPaths
         Directory.CreateDirectory(UsageLogDirectory);
         Directory.CreateDirectory(IconDirectory);
         Directory.CreateDirectory(UpdateDirectory);
+        Directory.CreateDirectory(ConfigBackupDirectory);
 
         var codexRoot = codexDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -41,6 +46,14 @@ public sealed class AppPaths
     public string RootDirectory { get; }
 
     public string ConfigPath { get; }
+
+    public string SecretsPath { get; }
+
+    public string SecretKeyPath { get; }
+
+    public string SecretKeyProtectedPath { get; }
+
+    public string ConfigBackupDirectory { get; }
 
     public string PricingPath { get; }
 

@@ -1,6 +1,8 @@
 using System.Net;
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
 using CodexSwitch.Models;
 using CodexSwitch.Serialization;
 using CodexSwitch.Services;
@@ -127,10 +129,12 @@ public sealed class ProxyHostService : IAsyncDisposable
             KeepAliveInterval = TimeSpan.FromSeconds(30)
         });
         app.Use(ApplyLowLatencyClientConnectionAsync);
+        app.Use(AuthorizeInboundRequestAsync);
         app.MapGet("/health", WriteHealthAsync);
-        app.MapGet("/v1/models", WriteModelsAsync);
+        app.MapGet("/v1/models", HandleModelsAsync);
         app.MapGet("/v1/responses", HandleResponsesWebSocketAsync);
         app.MapPost("/v1/responses", HandleResponsesAsync);
+        app.MapPost("/v1/chat/completions", HandleChatCompletionsAsync);
         app.MapPost("/v1/messages", HandleMessagesAsync);
         app.MapHealthChecks("/health");
 
@@ -303,6 +307,12 @@ public sealed class ProxyHostService : IAsyncDisposable
             return;
         }
 
+        if (!IsAuthorized(httpContext))
+        {
+            await WriteUnauthorizedAsync(httpContext);
+            return;
+        }
+
         using var socket = await httpContext.WebSockets.AcceptWebSocketAsync();
         var responsesHttpClient = _adapters.TryGetValue(ProviderProtocol.OpenAiResponses, out var adapter) &&
             adapter is OpenAiResponsesAdapter responsesAdapter
@@ -322,11 +332,11 @@ public sealed class ProxyHostService : IAsyncDisposable
 
     private async Task HandleResponsesAsync(HttpContext httpContext)
     {
-        // if (!IsAuthorized(httpContext))
-        // {
-        //     await WriteJsonErrorAsync(httpContext, StatusCodes.Status401Unauthorized, "Invalid CodexSwitch local API key.");
-        //     return;
-        // }
+        if (!IsAuthorized(httpContext))
+        {
+            await WriteUnauthorizedAsync(httpContext);
+            return;
+        }
 
         using var inputActivity = _usageMeter.BeginInputActivity();
         ResponsesRequestSnapshot snapshot;
@@ -365,6 +375,12 @@ public sealed class ProxyHostService : IAsyncDisposable
 
     private async Task HandleMessagesAsync(HttpContext httpContext)
     {
+        if (!IsAuthorized(httpContext))
+        {
+            await WriteUnauthorizedAsync(httpContext);
+            return;
+        }
+
         using var inputActivity = _usageMeter.BeginInputActivity();
         JsonDocument document;
         try
@@ -549,6 +565,41 @@ public sealed class ProxyHostService : IAsyncDisposable
         await WriteAllProvidersUnavailableAsync(httpContext, attempts);
     }
 
+    private async Task HandleChatCompletionsAsync(HttpContext httpContext)
+    {
+        if (!IsAuthorized(httpContext))
+        {
+            await WriteUnauthorizedAsync(httpContext);
+            return;
+        }
+
+        JsonDocument document;
+        try
+        {
+            document = await JsonDocument.ParseAsync(
+                httpContext.Request.Body,
+                cancellationToken: httpContext.RequestAborted);
+        }
+        catch (JsonException)
+        {
+            await WriteJsonErrorAsync(httpContext, StatusCodes.Status400BadRequest, "Invalid JSON body.");
+            return;
+        }
+
+        using (document)
+        {
+        var requestModel = ExtractRequestModel(document.RootElement);
+        await ForwardAsync(
+            httpContext,
+            document,
+            requestModel,
+            ClientAppKind.Codex,
+            "No active provider configured.",
+            static (adapter, context, cancellationToken) =>
+                adapter.HandleChatCompletionsAsync(context, cancellationToken));
+        }
+    }
+
     private static void ResetResponseForRetry(HttpResponse response)
     {
         if (response.HasStarted)
@@ -628,6 +679,18 @@ public sealed class ProxyHostService : IAsyncDisposable
         return next();
     }
 
+    private async Task AuthorizeInboundRequestAsync(HttpContext httpContext, Func<Task> next)
+    {
+        if (httpContext.Request.Path.StartsWithSegments("/v1") &&
+            !IsAuthorized(httpContext))
+        {
+            await WriteUnauthorizedAsync(httpContext);
+            return;
+        }
+
+        await next();
+    }
+
     private Task WriteHealthAsync(HttpContext httpContext)
     {
         var snapshot = _usageMeter.Snapshot;
@@ -646,6 +709,17 @@ public sealed class ProxyHostService : IAsyncDisposable
         return httpContext.Response.WriteAsync(json, httpContext.RequestAborted);
     }
 
+    private async Task HandleModelsAsync(HttpContext httpContext)
+    {
+        if (!IsAuthorized(httpContext))
+        {
+            await WriteUnauthorizedAsync(httpContext);
+            return;
+        }
+
+        await WriteModelsAsync(httpContext);
+    }
+
     private Task WriteModelsAsync(HttpContext httpContext)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -658,7 +732,8 @@ public sealed class ProxyHostService : IAsyncDisposable
             {
                 Id = model.Id,
                 Created = now,
-                OwnedBy = model.OwnedBy
+                OwnedBy = model.OwnedBy,
+                Capabilities = BuildModelCapabilities(provider, model.Id)
             })
             .ToArray();
 
@@ -668,14 +743,72 @@ public sealed class ProxyHostService : IAsyncDisposable
         return httpContext.Response.WriteAsync(json, httpContext.RequestAborted);
     }
 
+    private ModelCapabilities BuildModelCapabilities(ProviderConfig? provider, string modelId)
+    {
+        var normalized = modelId.ToLowerInvariant();
+        var pricing = _priceCalculator.FindPricingRule(modelId);
+        var firstInput = pricing?.Input.Tiers.FirstOrDefault()?.PricePerUnit;
+        var firstCached = pricing?.CachedInput.Tiers.FirstOrDefault()?.PricePerUnit;
+        var firstOutput = pricing?.Output.Tiers.FirstOrDefault()?.PricePerUnit;
+
+        return new ModelCapabilities
+        {
+            ContextWindow = provider?.Codex.EnableOneMillionContext == true ? 1_000_000 : 272_000,
+            ReasoningEfforts = ResolveReasoningEfforts(normalized),
+            Vision = normalized.StartsWith("gpt-", StringComparison.Ordinal) ||
+                normalized.StartsWith("claude-", StringComparison.Ordinal) ||
+                normalized.StartsWith("gemini-", StringComparison.Ordinal),
+            ToolCalls = true,
+            Pricing = pricing is null
+                ? null
+                : new ModelPricingInfo
+                {
+                    Currency = _priceCalculator.Currency,
+                    InputPerMillion = firstInput,
+                    CachedInputPerMillion = firstCached,
+                    OutputPerMillion = firstOutput
+                }
+        };
+    }
+
+    private static string[] ResolveReasoningEfforts(string model)
+    {
+        if (model.StartsWith("gpt-6.1", StringComparison.Ordinal) ||
+            model.StartsWith("gpt-6-", StringComparison.Ordinal))
+        {
+            return ["low", "medium", "high", "xhigh", "max", "ultra"];
+        }
+
+        if (model.StartsWith("gpt-", StringComparison.Ordinal))
+            return ["low", "medium", "high", "xhigh"];
+
+        return [];
+    }
+
     private bool IsAuthorized(HttpContext httpContext)
     {
         var apiKey = _config.Proxy.InboundApiKey;
         if (string.IsNullOrWhiteSpace(apiKey))
-            return true;
+            return false;
 
         var header = httpContext.Request.Headers.Authorization.ToString();
-        return string.Equals(header, "Bearer " + apiKey, StringComparison.Ordinal);
+        const string bearerPrefix = "Bearer ";
+        if (!header.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var suppliedKey = header[bearerPrefix.Length..].Trim();
+        var expectedBytes = Encoding.UTF8.GetBytes(apiKey.Trim());
+        var suppliedBytes = Encoding.UTF8.GetBytes(suppliedKey);
+        return CryptographicOperations.FixedTimeEquals(expectedBytes, suppliedBytes);
+    }
+
+    private static Task WriteUnauthorizedAsync(HttpContext httpContext)
+    {
+        httpContext.Response.Headers.WWWAuthenticate = "Bearer";
+        return WriteJsonErrorAsync(
+            httpContext,
+            StatusCodes.Status401Unauthorized,
+            "Invalid CodexSwitch local API key.");
     }
 
     private static string? ExtractRequestModel(JsonElement root)

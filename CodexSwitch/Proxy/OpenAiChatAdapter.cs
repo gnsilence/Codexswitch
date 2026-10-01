@@ -20,6 +20,215 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
 
     public ProviderProtocol Protocol => ProviderProtocol.OpenAiChat;
 
+    public async Task<ProviderAdapterResult> HandleChatCompletionsAsync(
+        ProviderRequestContext context,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var root = context.RequestRoot;
+        var requestModel = ResponsesPayloadBuilder.ExtractRequestModel(root) ?? context.Provider.DefaultModel;
+        var isStream = ResponsesPayloadBuilder.ExtractStream(root);
+        byte[] payload;
+        try
+        {
+            payload = BuildDirectChatPayload(context);
+        }
+        catch (ProtocolConversionException ex)
+        {
+            await ProtocolAdapterCommon.WriteJsonErrorAsync(
+                context.HttpContext,
+                StatusCodes.Status400BadRequest,
+                ex.Message,
+                cancellationToken);
+            return ProviderAdapterResult.NonRetryableFailure(StatusCodes.Status400BadRequest, ex.Message);
+        }
+
+        try
+        {
+            using var response = await SendWithOAuthRefreshAsync(
+                context,
+                payload,
+                isStream ? HttpCompletionOption.ResponseHeadersRead : HttpCompletionOption.ResponseContentRead,
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                stopwatch.Stop();
+                ProtocolAdapterCommon.Record(
+                    context,
+                    ProtocolAdapterCommon.CreateRecord(
+                        context,
+                        requestModel,
+                        isStream,
+                        (int)response.StatusCode,
+                        stopwatch.ElapsedMilliseconds,
+                        default,
+                        null,
+                        errorBody));
+
+                if (ProtocolAdapterCommon.IsTransientStatusCode(response.StatusCode))
+                {
+                    return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                        (int)response.StatusCode,
+                        errorBody,
+                        ProtocolAdapterCommon.GetRetryAfter(response));
+                }
+
+                await ProtocolAdapterCommon.WriteJsonErrorAsync(
+                    context.HttpContext,
+                    (int)response.StatusCode,
+                    errorBody,
+                    cancellationToken);
+                return ProviderAdapterResult.NonRetryableFailure((int)response.StatusCode, errorBody);
+            }
+
+            if (isStream)
+            {
+                context.HttpContext.Response.StatusCode = StatusCodes.Status200OK;
+                context.HttpContext.Response.ContentType = "text/event-stream";
+                UsageTokens usage = default;
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                while (await reader.ReadLineAsync(cancellationToken) is { } line)
+                {
+                    await context.HttpContext.Response.WriteAsync(line + "\n", cancellationToken);
+                    await context.HttpContext.Response.Body.FlushAsync(cancellationToken);
+                    if (line.StartsWith("data:", StringComparison.Ordinal))
+                    {
+                        var data = line[5..].Trim();
+                        if (data != "[DONE]")
+                        {
+                            try
+                            {
+                                using var chunk = JsonDocument.Parse(data);
+                                if (chunk.RootElement.TryGetProperty("usage", out _))
+                                    usage = ParseChatUsage(chunk.RootElement);
+                                ProtocolAdapterCommon.ReportOutputActivity(
+                                    context.HttpContext,
+                                    null,
+                                    data);
+                            }
+                            catch (JsonException)
+                            {
+                            }
+                        }
+                    }
+                }
+
+                stopwatch.Stop();
+                ProtocolAdapterCommon.Record(
+                    context,
+                    ProtocolAdapterCommon.CreateRecord(
+                        context,
+                        requestModel,
+                        true,
+                        StatusCodes.Status200OK,
+                        stopwatch.ElapsedMilliseconds,
+                        usage,
+                        requestModel,
+                        null));
+                return ProviderAdapterResult.Success();
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var responseDocument = JsonDocument.Parse(body);
+            var usageTokens = ParseChatUsage(responseDocument.RootElement);
+            stopwatch.Stop();
+            ProtocolAdapterCommon.Record(
+                context,
+                ProtocolAdapterCommon.CreateRecord(
+                    context,
+                    requestModel,
+                    false,
+                    StatusCodes.Status200OK,
+                    stopwatch.ElapsedMilliseconds,
+                    usageTokens,
+                    TryGetString(responseDocument.RootElement, "model") ?? requestModel,
+                    null));
+            context.HttpContext.Response.ContentType = "application/json";
+            await context.HttpContext.Response.WriteAsync(body, cancellationToken);
+            return ProviderAdapterResult.Success();
+        }
+        catch (Exception ex) when (ProtocolAdapterCommon.IsTransientException(ex, cancellationToken))
+        {
+            stopwatch.Stop();
+            if (context.HttpContext.Response.HasStarted)
+            {
+                return ProtocolAdapterCommon.RecordResponseAlreadyStartedFailure(
+                    context,
+                    requestModel,
+                    isStream,
+                    stopwatch,
+                    ex);
+            }
+
+            ProtocolAdapterCommon.Record(
+                context,
+                ProtocolAdapterCommon.CreateRecord(
+                    context,
+                    requestModel,
+                    isStream,
+                    StatusCodes.Status502BadGateway,
+                    stopwatch.ElapsedMilliseconds,
+                    default,
+                    null,
+                    ex.Message));
+            return ProviderAdapterResult.RetryableFailureBeforeResponseStarted(
+                StatusCodes.Status502BadGateway,
+                ex.Message);
+        }
+    }
+
+    private static byte[] BuildDirectChatPayload(ProviderRequestContext context)
+    {
+        if (context.RequestRoot.ValueKind != JsonValueKind.Object)
+            throw new ProtocolConversionException("Chat completions request body must be a JSON object.");
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in context.RequestRoot.EnumerateObject())
+            {
+                if (property.NameEquals("model"))
+                {
+                    var requestedModel = property.Value.ValueKind == JsonValueKind.String
+                        ? property.Value.GetString()
+                        : null;
+                    writer.WriteString(
+                        "model",
+                        ResolveMessagesChatModel(context, requestedModel ?? context.Provider.DefaultModel));
+                }
+                else if (property.NameEquals("reasoning_effort") &&
+                         property.Value.ValueKind == JsonValueKind.String)
+                {
+                    writer.WriteString(
+                        "reasoning_effort",
+                        ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                            context.Provider,
+                            context.Model,
+                            ResponsesPayloadBuilder.ExtractRequestModel(context.RequestRoot),
+                            property.Value.GetString()));
+                }
+                else
+                {
+                    property.WriteTo(writer);
+                }
+            }
+
+            if (!context.RequestRoot.TryGetProperty("model", out _) &&
+                !string.IsNullOrWhiteSpace(context.Provider.DefaultModel))
+            {
+                writer.WriteString("model", ResolveMessagesChatModel(context, context.Provider.DefaultModel));
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return stream.ToArray();
+    }
+
     public async Task<ProviderAdapterResult> HandleResponsesAsync(ProviderRequestContext context, CancellationToken cancellationToken)
     {
         if (!ResponsesRequestContextParser.TryParse(
@@ -465,6 +674,23 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
                     case "service_tier":
                         wroteServiceTier = true;
                         requestedServiceTier = property.Value.Clone();
+                        break;
+
+                    case "reasoning_effort":
+                        if (property.Value.ValueKind == JsonValueKind.String)
+                        {
+                            writer.WriteString(
+                                property.Name,
+                                ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                                    context.Provider,
+                                    context.Model,
+                                    requestModel,
+                                    property.Value.GetString()));
+                        }
+                        else
+                        {
+                            property.WriteTo(writer);
+                        }
                         break;
 
                     case "thinking":
@@ -1737,7 +1963,13 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
             }
 
             if (!string.IsNullOrWhiteSpace(reasoningEffort))
-                writer.WriteString("reasoning_effort", reasoningEffort);
+                writer.WriteString(
+                    "reasoning_effort",
+                    ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                        context.Provider,
+                        context.Model,
+                        ResponsesPayloadBuilder.ExtractRequestModel(root),
+                        reasoningEffort));
 
             if (!string.IsNullOrWhiteSpace(verbosity))
                 writer.WriteString("verbosity", verbosity);
@@ -4344,6 +4576,28 @@ public sealed class OpenAiChatAdapter : IProviderProtocolAdapter
             request.Headers.TryAddWithoutValidation(header.Key, header.Value);
 
         return request;
+    }
+
+    private async Task<HttpResponseMessage> SendWithOAuthRefreshAsync(
+        ProviderRequestContext context,
+        byte[] payload,
+        HttpCompletionOption completionOption,
+        CancellationToken cancellationToken)
+    {
+        using var request = CreateUpstreamRequest(context, payload);
+        var response = await _httpClient.SendAsync(request, completionOption, cancellationToken);
+        if (ShouldRetryWithFreshOAuth(context, response) &&
+            await context.TryForceRefreshAuthAsync(cancellationToken))
+        {
+            response.Dispose();
+            using var refreshedRequest = CreateUpstreamRequest(context, payload);
+            response = await _httpClient.SendAsync(
+                refreshedRequest,
+                completionOption,
+                cancellationToken);
+        }
+
+        return response;
     }
 
     private static bool ShouldRetryWithFreshOAuth(ProviderRequestContext context, HttpResponseMessage response)

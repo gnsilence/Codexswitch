@@ -9,10 +9,12 @@ public sealed class PriceCalculator
         _catalog = catalog;
     }
 
+    public string Currency => _catalog.Currency;
+
     public CostBreakdown Calculate(
         string model, UsageTokens usage, ProviderCostSettings settings, string? serviceTier = null)
     {
-        var rule = FindRule(model);
+        var rule = FindPricingRule(model);
         if (rule is null)
             return new CostBreakdown(0m, 0m, 0m, settings.Multiplier);
 
@@ -56,14 +58,13 @@ public sealed class PriceCalculator
         return rule.ServiceTierMultipliers.TryGetValue(tier, out var multiplier) ? multiplier : 1m;
     }
 
-    private ModelPricingRule? FindRule(string model)
+    public ModelPricingRule? FindPricingRule(string model)
     {
         ModelPricingRule? bestMatch = null;
         var bestSpecificity = -1;
         foreach (var rule in _catalog.Models)
         {
             SelectBestMatch(rule, rule.Id, model, ref bestMatch, ref bestSpecificity);
-
             foreach (var alias in rule.Aliases)
                 SelectBestMatch(rule, alias, model, ref bestMatch, ref bestSpecificity);
         }
