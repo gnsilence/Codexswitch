@@ -16,6 +16,8 @@ This repository uses a single in-repo version source plus an automated GitHub Re
 4. Create and push a Git tag named `vX.Y.Z`. The release job checks that the tag matches `Directory.Build.props` before publishing.
 5. Wait for the tagged `ci` run to finish. It will publish the platform installers and create the GitHub Release automatically.
 
+If a tagged run fails because of a build-environment issue, fix the workflow on `master`, then manually run `ci` on `master` with `release_tag` set to the existing tag. The workflow checks out and validates the original tag for every job, rebuilds the installers, and publishes the release without moving the tag.
+
 ## macOS packaging, signing, and notarization
 
 Tagged releases always package macOS artifacts as `.app` bundles inside `.dmg` files. Developer ID signing and Apple notarization are optional: when CI has the credentials below, the DMGs are signed, notarized, stapled, and Gatekeeper-validated. Without them, CI still builds ad-hoc signed DMGs so the release has macOS assets, but downloaded artifacts may be blocked by Gatekeeper.
