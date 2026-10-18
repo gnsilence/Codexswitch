@@ -2209,9 +2209,23 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
                 return;
             }
 
+            var existingReasoningEfforts = provider.Models
+                .Where(route => route.SupportedReasoningEfforts is not null)
+                .GroupBy(route => route.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.First().SupportedReasoningEfforts!,
+                    StringComparer.OrdinalIgnoreCase);
             provider.Models.Clear();
             foreach (var route in routes)
+            {
+                if (existingReasoningEfforts.TryGetValue(route.Id, out var reasoningEfforts))
+                {
+                    route.SupportedReasoningEfforts = new Collection<string>(reasoningEfforts.ToList());
+                }
+
                 provider.Models.Add(route);
+            }
 
             if (string.IsNullOrWhiteSpace(provider.DefaultModel) ||
                 !routes.Any(route => string.Equals(route.Id, provider.DefaultModel, StringComparison.OrdinalIgnoreCase)))
@@ -2560,27 +2574,38 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
         provider.Cost.Multiplier = TryParsePositiveDecimal(SelectedBillingMultiplier, out var billingMultiplier)
             ? billingMultiplier
             : 1m;
-        provider.Models.Clear();
+        var modelRoutes = new List<ModelRouteConfig>();
 
         foreach (var row in ModelRows)
         {
             if (string.IsNullOrWhiteSpace(row.Id))
                 continue;
 
-            provider.Models.Add(new ModelRouteConfig
+            var reasoningEfforts = row.ReasoningEffortOptions
+                .Where(option => option.IsSelected)
+                .ToArray();
+            if (reasoningEfforts.Length == 0)
+            {
+                StatusMessage = T("status.modelRouteReasoningRequired");
+                return;
+            }
+
+            modelRoutes.Add(new ModelRouteConfig
             {
                 Id = row.Id.Trim(),
                 DisplayName = string.IsNullOrWhiteSpace(row.DisplayName) ? null : row.DisplayName.Trim(),
                 UpstreamModel = string.IsNullOrWhiteSpace(row.UpstreamModel) ? null : row.UpstreamModel.Trim(),
                 Protocol = row.Protocol,
                 ServiceTier = string.IsNullOrWhiteSpace(row.ServiceTier) ? null : row.ServiceTier.Trim(),
-                Cost = new ProviderCostSettings { FastMode = row.FastMode }
+                Cost = new ProviderCostSettings { FastMode = row.FastMode },
+                SupportedReasoningEfforts = new Collection<string>(
+                    reasoningEfforts.Select(option => option.Effort).ToList()),
             });
         }
 
-        if (provider.Models.Count == 0 && !string.IsNullOrWhiteSpace(provider.DefaultModel))
+        if (modelRoutes.Count == 0 && !string.IsNullOrWhiteSpace(provider.DefaultModel))
         {
-            provider.Models.Add(new ModelRouteConfig
+            modelRoutes.Add(new ModelRouteConfig
             {
                 Id = provider.DefaultModel,
                 Protocol = provider.Protocol,
@@ -2588,6 +2613,10 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
                 Cost = new ProviderCostSettings { FastMode = provider.Cost.FastMode }
             });
         }
+
+        provider.Models.Clear();
+        foreach (var route in modelRoutes)
+            provider.Models.Add(route);
 
         provider.ModelConversions.Clear();
         foreach (var row in ModelConversionRows)
@@ -2679,6 +2708,9 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
                     Protocol = model.Protocol,
                     ServiceTier = model.ServiceTier ?? "",
                     FastMode = model.Cost?.FastMode ?? provider.Cost?.FastMode ?? _config.GlobalCost.FastMode,
+                    ReasoningEffortOptions = CreateReasoningEffortOptions(
+                        model.UpstreamModel ?? model.Id,
+                        model.SupportedReasoningEfforts),
                     RemoveCommand = RemoveProviderModelCommand
                 });
             }
@@ -2715,6 +2747,7 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
                     Protocol = provider.Protocol,
                     ServiceTier = provider.ServiceTier ?? "",
                     FastMode = provider.Cost?.FastMode ?? false,
+                    ReasoningEffortOptions = CreateReasoningEffortOptions(provider.DefaultModel),
                     RemoveCommand = RemoveProviderModelCommand
                 });
             }
@@ -3157,15 +3190,31 @@ public partial class MainWindowViewModel : ViewModelBase, IAsyncDisposable
     private void AddProviderModel()
     {
         var seed = string.IsNullOrWhiteSpace(SelectedDefaultModel) ? "new-model" : SelectedDefaultModel.Trim();
+        var id = MakeUniqueId(seed, ModelRows.Select(row => row.Id));
         ModelRows.Add(new ModelEditorItem
         {
-            Id = MakeUniqueId(seed, ModelRows.Select(row => row.Id)),
+            Id = id,
             Protocol = SelectedProtocol,
             ServiceTier = SelectedServiceTier,
             FastMode = SelectedFastMode,
+            ReasoningEffortOptions = CreateReasoningEffortOptions(id),
             RemoveCommand = RemoveProviderModelCommand
         });
         StatusMessage = T("status.modelRouteAdded");
+    }
+
+    private static ObservableCollection<ReasoningEffortEditorItem> CreateReasoningEffortOptions(
+        string? modelId,
+        IEnumerable<string>? selectedEfforts = null)
+    {
+        var selected = (selectedEfforts ?? ModelReasoningEffortCatalog.ResolveLegacy(modelId))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return new ObservableCollection<ReasoningEffortEditorItem>(
+            ModelReasoningEffortCatalog.All.Select(effort => new ReasoningEffortEditorItem
+            {
+                Effort = effort,
+                IsSelected = selected.Contains(effort)
+            }));
     }
 
     private void RemoveProviderModel(ModelEditorItem? row)
@@ -6502,9 +6551,19 @@ public sealed partial class ModelEditorItem : ObservableObject
     [ObservableProperty]
     private bool _fastMode;
 
+    public ObservableCollection<ReasoningEffortEditorItem> ReasoningEffortOptions { get; set; } = [];
+
     public IRelayCommand<ModelEditorItem>? RemoveCommand { get; init; }
 
     public ProviderProtocol[] ProtocolOptions { get; } = Enum.GetValues<ProviderProtocol>();
+}
+
+public sealed partial class ReasoningEffortEditorItem : ObservableObject
+{
+    public string Effort { get; init; } = "";
+
+    [ObservableProperty]
+    private bool _isSelected;
 }
 
 public sealed partial class ModelConversionEditorItem : ObservableObject

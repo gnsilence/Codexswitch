@@ -10,6 +10,27 @@ namespace CodexSwitch.Tests;
 
 public sealed class OpenAiChatAdapterMessagesTests
 {
+    [Theory]
+    [InlineData("max", "max")]
+    [InlineData("ultra", "max")]
+    [InlineData("xhigh", "high")]
+    public async Task HandleResponsesAsync_DeepSeekPreservesMaximumReasoning(string effort, string expected)
+    {
+        using var request = JsonDocument.Parse(
+            $$"""{"model":"local-alias","reasoning":{"effort":"{{effort}}"},"input":"hello"}""");
+        using var fixture = new AdapterFixture(request, """
+            {"id":"chatcmpl-deepseek","object":"chat.completion","model":"deepseek-v4-pro",
+             "choices":[{"index":0,"message":{"role":"assistant","content":"Done."},"finish_reason":"stop"}],
+             "usage":{"prompt_tokens":1,"completion_tokens":1}}
+            """);
+        fixture.Context.Model!.UpstreamModel = "deepseek-v4-pro";
+
+        await fixture.InvokeResponsesAsync();
+
+        using var upstream = JsonDocument.Parse(Assert.Single(fixture.Handler.Requests).Body);
+        Assert.Equal(expected, upstream.RootElement.GetProperty("reasoning_effort").GetString());
+    }
+
     [Fact]
     public async Task HandleMessagesAsync_Gpt61SolUltraReasoningMapsToUpstreamMax()
     {

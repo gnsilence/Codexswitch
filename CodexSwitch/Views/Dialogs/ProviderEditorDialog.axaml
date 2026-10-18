@@ -343,7 +343,7 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="vm:ModelEditorItem">
                                             <Border Classes="route-row" Margin="0,0,0,10">
-                                                <Grid RowDefinitions="Auto,Auto"
+                                                <Grid RowDefinitions="Auto,Auto,Auto"
                                                       ColumnDefinitions="1.1*,1.1*,1.1*,Auto"
                                                       ColumnSpacing="10"
                                                       RowSpacing="10">
@@ -378,6 +378,27 @@
                                                                      Content="{i18n:Tr providerDialog.fastMode}"
                                                                      IsChecked="{Binding FastMode, Mode=TwoWay}"
                                                                      VerticalAlignment="Bottom"/>
+
+                                                    <StackPanel Grid.Row="2"
+                                                                Grid.ColumnSpan="4"
+                                                                Spacing="6">
+                                                        <ui:CsText Text="{i18n:Tr providerDialog.reasoningEfforts}"
+                                                                   Classes="muted"/>
+                                                        <ItemsControl ItemsSource="{Binding ReasoningEffortOptions}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel/>
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="vm:ReasoningEffortEditorItem">
+                                                                    <CheckBox Content="{Binding Effort}"
+                                                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                              Margin="0,0,14,4"/>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
                                                 </Grid>
                                             </Border>
                                         </DataTemplate>

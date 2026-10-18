@@ -9,6 +9,26 @@ public static class BuiltInModelCatalog
     public const long OpenAiLongContextThresholdTokens = 272_000;
     public const long XiaomiLongContextThresholdTokens = 256_000;
 
+    internal static bool SupportsDeepSeekMaxReasoning(string? modelId)
+    {
+        return !string.IsNullOrWhiteSpace(modelId) &&
+            (modelId.StartsWith("deepseek-v4", StringComparison.OrdinalIgnoreCase) ||
+             modelId.StartsWith("deepseek-flash", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(modelId, "deepseek-chat", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(modelId, "deepseek-reasoner", StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static string? NormalizeDeepSeekReasoningEffort(string? effort)
+    {
+        return effort?.Trim().ToLowerInvariant() switch
+        {
+            "minimal" => "low",
+            "medium" or "xhigh" => "high",
+            "ultra" => "max",
+            _ => effort
+        };
+    }
+
     public static IReadOnlyList<ProviderTemplateModel> AiossModels => OpenAiOfficialModels;
 
     public static IReadOnlyList<ProviderTemplateModel> RoutinAiModels { get; } =

@@ -10,6 +10,33 @@ namespace CodexSwitch.Tests;
 
 public sealed class AnthropicMessagesAdapterResponsesTests
 {
+    [Theory]
+    [InlineData("deepseek-v4-flash", "max", "max")]
+    [InlineData("deepseek-v4-pro", "max", "max")]
+    [InlineData("deepseek-v4-pro", "ultra", "max")]
+    [InlineData("deepseek-v4-pro", "xhigh", "high")]
+    public async Task HandleResponsesAsync_DeepSeekWritesNativeThinkingEffort(
+        string upstreamModel, string effort, string expected)
+    {
+        using var request = JsonDocument.Parse(
+            $$"""{"model":"local-alias","reasoning":{"effort":"{{effort}}"},"output_config":{"effort":"low"},"input":"hello"}""");
+        using var fixture = new AdapterFixture(request, """
+            {"id":"msg-deepseek","type":"message","role":"assistant","model":"deepseek-v4-pro",
+             "content":[{"type":"text","text":"Done."}],"stop_reason":"end_turn",
+             "usage":{"input_tokens":1,"output_tokens":1}}
+            """);
+        fixture.Context.Model!.UpstreamModel = upstreamModel;
+
+        await fixture.InvokeAsync();
+
+        using var upstream = JsonDocument.Parse(Assert.Single(fixture.Handler.Requests).Body);
+        var root = upstream.RootElement;
+        Assert.Equal("enabled", root.GetProperty("thinking").GetProperty("type").GetString());
+        Assert.Equal(expected, root.GetProperty("output_config").GetProperty("effort").GetString());
+        Assert.Single(root.EnumerateObject(), property => property.NameEquals("output_config"));
+        Assert.False(root.GetProperty("thinking").TryGetProperty("budget_tokens", out _));
+    }
+
     [Fact]
     public async Task HandleResponsesAsync_ConvertsResponsesReasoningToAnthropicThinking()
     {

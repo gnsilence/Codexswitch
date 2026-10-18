@@ -217,6 +217,73 @@ public sealed class CodexConfigWriterTests : IDisposable
             "grok-4.6");
     }
 
+    [Theory]
+    [InlineData("deepseek-flash")]
+    [InlineData("deepseek-v4-flash")]
+    [InlineData("deepseek-v4-pro")]
+    [InlineData("deepseek-v4-flash-vision-exp")]
+    [InlineData("deepseek-chat")]
+    [InlineData("deepseek-reasoner")]
+    public void Apply_DeepSeekAdvertisesNativeMaxAndDesktopUltraAlias(string modelId)
+    {
+        var paths = new AppPaths(
+            Path.Combine(_tempDirectory, modelId, "appdata"),
+            Path.Combine(_tempDirectory, modelId, "codex"));
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexConfigPath, "model_reasoning_effort = \"max\"\n");
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "deepseek",
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "deepseek",
+                    SupportsCodex = true,
+                    DefaultModel = modelId,
+                    Models = { new ModelRouteConfig { Id = modelId } }
+                }
+            }
+        });
+
+        using var catalog = JsonDocument.Parse(File.ReadAllText(paths.CodexModelCatalogPath));
+        var entry = Assert.Single(catalog.RootElement.GetProperty("models").EnumerateArray());
+        Assert.Equal(["none", "low", "high", "max", "ultra"],
+            entry.GetProperty("supported_reasoning_levels").EnumerateArray()
+                .Select(level => level.GetProperty("effort").GetString() ?? "").ToArray());
+        Assert.Equal("high", entry.GetProperty("default_reasoning_level").GetString());
+        Assert.Contains("model_reasoning_effort = \"max\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("xhigh", "high")]
+    [InlineData("medium", "high")]
+    [InlineData("minimal", "low")]
+    [InlineData("max", "max")]
+    [InlineData("ultra", "ultra")]
+    public void Apply_DeepSeekNormalizesAndPreservesSelectedReasoning(string selected, string expected)
+    {
+        var paths = new AppPaths(
+            Path.Combine(_tempDirectory, "deepseek-effort-appdata"),
+            Path.Combine(_tempDirectory, "deepseek-effort-codex"));
+        Directory.CreateDirectory(paths.CodexDirectory);
+        File.WriteAllText(paths.CodexConfigPath, $"model_reasoning_effort = \"{selected}\"\n");
+        var writer = new CodexConfigWriter(paths);
+        var config = new AppConfig
+        {
+            ActiveCodexProviderId = "deepseek",
+            Providers =
+            {
+                new ProviderConfig { Id = "deepseek", SupportsCodex = true, DefaultModel = "deepseek-v4-pro" }
+            }
+        };
+
+        writer.Apply(config);
+        Assert.Contains($"model_reasoning_effort = \"{expected}\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+        writer.Apply(config);
+        Assert.Contains($"model_reasoning_effort = \"{expected}\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Apply_MergesBuiltInGptRoutesAndWritesAllReasoningLevels()
     {
@@ -307,6 +374,57 @@ public sealed class CodexConfigWriterTests : IDisposable
                 .EnumerateArray()
                 .Select(level => level.GetProperty("effort").GetString() ?? "")
                 .ToArray());
+    }
+
+    [Fact]
+    public void Apply_UsesConfiguredReasoningEffortsForCustomModel()
+    {
+        var paths = new AppPaths(
+            Path.Combine(_tempDirectory, "configured-efforts-appdata"),
+            Path.Combine(_tempDirectory, "configured-efforts-codex"));
+        Directory.CreateDirectory(paths.CodexDirectory);
+
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            ActiveCodexProviderId = "custom",
+            Proxy = { ManageCodexConfig = true },
+            Providers =
+            {
+                new ProviderConfig
+                {
+                    Id = "custom",
+                    SupportsCodex = true,
+                    DefaultModel = "new-model",
+                    Models =
+                    {
+                        new ModelRouteConfig
+                        {
+                            Id = "new-model",
+                            Protocol = ProviderProtocol.OpenAiResponses,
+                            SupportedReasoningEfforts = ["low", "ultra", "persistent"]
+                        }
+                    }
+                }
+            }
+        });
+
+        using var catalog = JsonDocument.Parse(File.ReadAllText(paths.CodexModelCatalogPath));
+        var model = catalog.RootElement.GetProperty("models").EnumerateArray()
+            .Single(entry => entry.GetProperty("slug").GetString() == "new-model");
+        Assert.Equal(
+            ["low", "ultra", "persistent"],
+            model.GetProperty("supported_reasoning_levels").EnumerateArray()
+                .Select(level => level.GetProperty("effort").GetString() ?? "")
+                .ToArray());
+        Assert.Equal("low", model.GetProperty("default_reasoning_level").GetString());
+    }
+
+    [Fact]
+    public void ModelReasoningEffortCatalog_ContainsEverySelectableLevel()
+    {
+        Assert.Equal(
+            ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "persistent"],
+            ModelReasoningEffortCatalog.All);
     }
 
     [Theory]
@@ -849,6 +967,8 @@ public sealed class CodexConfigWriterTests : IDisposable
         Assert.True(File.Exists(BackupPath(paths.CodexAuthPath)));
         Assert.Equal(originalAuth, File.ReadAllText(BackupPath(paths.CodexAuthPath)));
         Assert.Contains("model_provider = \"meteor-ai\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+        Assert.Contains("requires_openai_auth = false", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+        Assert.Contains("experimental_bearer_token = \"local-secret\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
 
         writer.RestoreOriginal();
 
@@ -913,6 +1033,8 @@ public sealed class CodexConfigWriterTests : IDisposable
         Assert.Contains("Fake Codex App auth fixture", fakeAuth, StringComparison.Ordinal);
         Assert.Contains("fake-refresh-token-for-local-test-only", fakeAuth, StringComparison.Ordinal);
         Assert.DoesNotContain("real-token-placeholder", fakeAuth, StringComparison.Ordinal);
+        Assert.Contains("requires_openai_auth = false", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+        Assert.Contains("experimental_bearer_token = \"local-secret\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
         Assert.True(File.Exists(BackupPath(paths.CodexAuthPath)));
         Assert.Equal(originalAuth, File.ReadAllText(BackupPath(paths.CodexAuthPath)));
 
@@ -920,6 +1042,82 @@ public sealed class CodexConfigWriterTests : IDisposable
 
         Assert.Equal(originalAuth, File.ReadAllText(paths.CodexAuthPath));
         Assert.False(File.Exists(BackupPath(paths.CodexAuthPath)));
+    }
+
+    [Fact]
+    public void Apply_UpgradesLegacyProviderAuthAndKeepsOtherProviderSettings()
+    {
+        var paths = new AppPaths(
+            Path.Combine(_tempDirectory, "upgrade-auth-appdata"),
+            Path.Combine(_tempDirectory, "upgrade-auth-codex"));
+        Directory.CreateDirectory(paths.CodexDirectory);
+        const string originalConfig = """
+            model_provider = "meteor-ai"
+
+            [model_providers.meteor-ai]
+            name = "meteor-ai"
+            base_url = "http://127.0.0.1:12785/v1"
+            wire_api = "responses"
+            requires_openai_auth = true
+            env_key = "OLD_PROXY_API_KEY"
+            env_key_instructions = "Old connection instructions"
+            experimental_bearer_token = "stale-local-key"
+            request_max_retries = 3
+
+            [model_providers.custom]
+            env_key = "CUSTOM_API_KEY"
+            requires_openai_auth = true
+            """;
+        File.WriteAllText(paths.CodexConfigPath, originalConfig);
+        var config = new AppConfig
+        {
+            Proxy = { InboundApiKey = "legacy-local-key" }
+        };
+        var writer = new CodexConfigWriter(paths);
+
+        writer.Apply(config);
+
+        var configToml = File.ReadAllText(paths.CodexConfigPath);
+        Assert.Contains("requires_openai_auth = false", configToml, StringComparison.Ordinal);
+        Assert.Contains("experimental_bearer_token = \"legacy-local-key\"", configToml, StringComparison.Ordinal);
+        Assert.DoesNotContain("OLD_PROXY_API_KEY", configToml, StringComparison.Ordinal);
+        Assert.DoesNotContain("env_key_instructions", configToml, StringComparison.Ordinal);
+        Assert.DoesNotContain("stale-local-key", configToml, StringComparison.Ordinal);
+        Assert.Contains("request_max_retries = 3", configToml, StringComparison.Ordinal);
+        Assert.Contains("[model_providers.custom]\nenv_key = \"CUSTOM_API_KEY\"\nrequires_openai_auth = true",
+            configToml.Replace("\r\n", "\n"), StringComparison.Ordinal);
+        Assert.Equal(originalConfig, File.ReadAllText(BackupPath(paths.CodexConfigPath)));
+
+        config.Proxy.InboundApiKey = "updated-local-key";
+        writer.Apply(config);
+        configToml = File.ReadAllText(paths.CodexConfigPath);
+        Assert.Contains("experimental_bearer_token = \"updated-local-key\"", configToml, StringComparison.Ordinal);
+        Assert.DoesNotContain("legacy-local-key", configToml, StringComparison.Ordinal);
+        Assert.Equal(1, configToml.Split('\n').Count(line => line.StartsWith("experimental_bearer_token =", StringComparison.Ordinal)));
+        Assert.Equal(originalConfig, File.ReadAllText(BackupPath(paths.CodexConfigPath)));
+
+        writer.RestoreOriginal();
+        Assert.Equal(originalConfig, File.ReadAllText(paths.CodexConfigPath));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    public void Apply_EmptyInboundKeyUsesSameLegacyDefaultInProviderAndAuth(string? inboundKey)
+    {
+        var paths = new AppPaths(
+            Path.Combine(_tempDirectory, "default-key-appdata"),
+            Path.Combine(_tempDirectory, "default-key-codex"));
+
+        new CodexConfigWriter(paths).Apply(new AppConfig
+        {
+            Proxy = { InboundApiKey = inboundKey! }
+        });
+
+        Assert.Contains("experimental_bearer_token = \"sk-codex\"", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+        using var auth = JsonDocument.Parse(File.ReadAllText(paths.CodexAuthPath));
+        Assert.Equal("sk-codex", auth.RootElement.GetProperty("OPENAI_API_KEY").GetString());
     }
 
     [Fact]
@@ -1017,8 +1215,9 @@ public sealed class CodexConfigWriterTests : IDisposable
                 .EnumerateArray()
                 .Select(level => level.GetProperty("effort").GetString() ?? "")
                 .ToArray();
-            Assert.Equal(["none", "low", "medium", "high", "xhigh", "max"], reasoningLevels);
-            Assert.Equal("medium", model.GetProperty("default_reasoning_level").GetString());
+            var isDeepSeek = templateId == ProviderTemplateCatalog.DeepSeekBuiltinId;
+            Assert.Equal(isDeepSeek ? ["none", "low", "high", "max", "ultra"] : ["none", "low", "medium", "high", "xhigh", "max"], reasoningLevels);
+            Assert.Equal(isDeepSeek ? "high" : "medium", model.GetProperty("default_reasoning_level").GetString());
         }
     }
 

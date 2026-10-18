@@ -633,6 +633,10 @@ public sealed class UiV2InfrastructureTests : IDisposable
 
         using var missingKey = await client.GetAsync("/v1/models");
         Assert.Equal(HttpStatusCode.Unauthorized, missingKey.StatusCode);
+        var missingKeyBody = await missingKey.Content.ReadAsStringAsync();
+        Assert.Contains("local authentication configuration mismatch", missingKeyBody, StringComparison.Ordinal);
+        Assert.Contains("restart", missingKeyBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("local-secret", missingKeyBody, StringComparison.Ordinal);
 
         using var wrongKey = new HttpRequestMessage(HttpMethod.Get, "/v1/models");
         wrongKey.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "wrong-key");
@@ -649,6 +653,85 @@ public sealed class UiV2InfrastructureTests : IDisposable
         validKey.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
         using var validResponse = await client.SendAsync(validKey);
         Assert.Equal(HttpStatusCode.OK, validResponse.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("legacy-local-key", false, false)]
+    [InlineData("legacy-local-key", true, false)]
+    [InlineData("legacy-local-key", false, true)]
+    [InlineData("", true, false)]
+    public async Task ProxyHostService_StartAsync_UpgradesLegacyClientAuthentication(
+        string legacyKey,
+        bool preserveLogin,
+        bool fakeLogin)
+    {
+        var paths = CreatePaths("upgrade-client-auth");
+        Directory.CreateDirectory(paths.CodexDirectory);
+        const string originalAuth = "{\"auth_mode\":\"chatgpt\",\"tokens\":{\"access_token\":\"legacy-login-placeholder\"}}\n";
+        File.WriteAllText(paths.CodexAuthPath, originalAuth);
+        File.WriteAllText(paths.CodexConfigPath, """
+            model_provider = "meteor-ai"
+            [model_providers.meteor-ai]
+            name = "meteor-ai"
+            requires_openai_auth = true
+            """);
+        File.WriteAllText(paths.ConfigPath, $$"""
+            {
+              "schemaVersion": 5,
+              "activeProviderId": "legacy",
+              "activeCodexProviderId": "legacy",
+              "proxy": {
+                "enabled": true,
+                "host": "127.0.0.1",
+                "port": {{GetAvailablePort()}},
+                "inboundApiKey": "{{legacyKey}}",
+                "manageCodexConfig": true,
+                "preserveCodexAppAuth": {{preserveLogin.ToString().ToLowerInvariant()}},
+                "useFakeCodexAppAuth": {{fakeLogin.ToString().ToLowerInvariant()}}
+              },
+              "providers": [{
+                "id": "legacy",
+                "supportsCodex": true,
+                "baseUrl": "https://example.com/v1",
+                "apiKey": "unchanged-upstream-key",
+                "defaultModel": "gpt-5.5"
+              }]
+            }
+            """);
+        var store = new ConfigurationStore(paths);
+        var config = store.LoadConfig();
+        var expectedKey = string.IsNullOrEmpty(legacyKey) ? "sk-codex" : legacyKey;
+        Assert.Equal(expectedKey, config.Proxy.InboundApiKey);
+        Assert.Equal(expectedKey, new ConfigurationStore(paths).LoadConfig().Proxy.InboundApiKey);
+        var calculator = new PriceCalculator(new ModelPricingCatalog());
+        using var upstream = new HttpClient();
+        await using var service = new ProxyHostService(
+            new UsageMeter(calculator),
+            calculator,
+            CreateUsageLogWriter(paths),
+            new CodexConfigWriter(paths),
+            new ClaudeCodeConfigWriter(paths),
+            new ProviderAuthService(store, config, upstream),
+            Array.Empty<IProviderProtocolAdapter>());
+
+        await service.StartAsync(config);
+
+        Assert.True(service.State.IsRunning);
+        var clientConfig = File.ReadAllText(paths.CodexConfigPath);
+        Assert.Contains("requires_openai_auth = false", clientConfig, StringComparison.Ordinal);
+        var tokenLine = clientConfig.Split('\n')
+            .Single(line => line.StartsWith("experimental_bearer_token =", StringComparison.Ordinal));
+        var clientKey = JsonSerializer.Deserialize<string>(tokenLine[(tokenLine.IndexOf('=') + 1)..].Trim());
+        Assert.Equal(expectedKey, clientKey);
+        if (preserveLogin)
+            Assert.Equal(originalAuth, File.ReadAllText(paths.CodexAuthPath));
+        Assert.Equal("unchanged-upstream-key", config.Providers.Single(provider => provider.Id == "legacy").ApiKey);
+        Assert.DoesNotContain("unchanged-upstream-key", clientConfig, StringComparison.Ordinal);
+
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", clientKey);
+        using var response = await client.GetAsync($"http://127.0.0.1:{config.Proxy.Port}/v1/models");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
@@ -690,6 +773,69 @@ public sealed class UiV2InfrastructureTests : IDisposable
         Assert.Contains("The selected provider is temporarily unavailable", body, StringComparison.Ordinal);
         Assert.Equal(1, meter.Snapshot.Requests);
         Assert.Equal(1, meter.Snapshot.Errors);
+    }
+
+    [Fact]
+    public async Task ProxyHostService_Models_AdvertisesDeepSeekMaxAndDesktopUltraAlias()
+    {
+        var paths = CreatePaths("deepseek-model-capabilities");
+        var provider = ProviderTemplateCatalog.CreateProvider(ProviderTemplateCatalog.DeepSeekBuiltinId, []);
+        provider.SupportsCodex = true;
+        var config = CreateResponsesProxyConfig(GetAvailablePort(), provider);
+        using var upstream = new HttpClient();
+        var meter = new UsageMeter(new PriceCalculator(new ModelPricingCatalog()));
+        await using var service = CreateProxyHostService(paths, config, meter, upstream);
+        await service.StartAsync(config);
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+
+        using var response = await client.GetAsync($"http://127.0.0.1:{config.Proxy.Port}/v1/models");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var models = document.RootElement.GetProperty("data").EnumerateArray().ToArray();
+        Assert.NotEmpty(models);
+        foreach (var model in models)
+        {
+            Assert.Equal(["none", "low", "high", "max", "ultra"],
+                model.GetProperty("capabilities").GetProperty("reasoning_efforts").EnumerateArray()
+                    .Select(level => level.GetString() ?? "").ToArray());
+        }
+    }
+
+    [Fact]
+    public async Task ProxyHostService_Models_UsesConfiguredReasoningEffortsForCustomModel()
+    {
+        var paths = CreatePaths("configured-model-capabilities");
+        var provider = CreateResponsesProvider("custom", "https://custom.test/v1");
+        provider.DefaultModel = "new-model";
+        provider.Models.Clear();
+        provider.Models.Add(new ModelRouteConfig
+        {
+            Id = "new-model",
+            Protocol = ProviderProtocol.OpenAiResponses,
+            UpstreamModel = "new-upstream-model",
+            SupportedReasoningEfforts = ["low", "ultra", "persistent"]
+        });
+        var config = CreateResponsesProxyConfig(GetAvailablePort(), provider);
+        using var upstream = new HttpClient();
+        var meter = new UsageMeter(new PriceCalculator(new ModelPricingCatalog()));
+        await using var service = CreateProxyHostService(paths, config, meter, upstream);
+        await service.StartAsync(config);
+        using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "local-secret");
+
+        using var response = await client.GetAsync($"http://127.0.0.1:{config.Proxy.Port}/v1/models");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var model = document.RootElement.GetProperty("data").EnumerateArray()
+            .Single(item => item.GetProperty("id").GetString() == "new-model");
+        Assert.Equal(
+            ["low", "ultra", "persistent"],
+            model.GetProperty("capabilities").GetProperty("reasoning_efforts").EnumerateArray()
+                .Select(level => level.GetString() ?? "")
+                .ToArray());
     }
 
     [Fact]

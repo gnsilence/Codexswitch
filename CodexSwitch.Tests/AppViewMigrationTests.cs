@@ -36,6 +36,8 @@ public sealed class AppViewMigrationTests
         Assert.Contains("<cui:CodexSelect ItemsSource=\"{Binding ProtocolOptions}\"", source);
         Assert.Contains("<cui:CodexSwitch Content=\"{i18n:Tr providerDialog.supportsCodex}\"", source);
         Assert.Contains("Text=\"{Binding SelectedBillingMultiplier, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\"", source);
+        Assert.Contains("ItemsSource=\"{Binding ReasoningEffortOptions}\"", source);
+        Assert.Contains("IsChecked=\"{Binding IsSelected, Mode=TwoWay}\"", source);
         Assert.Contains("IsReadOnly=\"{Binding IsDefault}\"", source);
         Assert.Contains("IsEnabled=\"{Binding CanEditTarget}\"", source);
     }

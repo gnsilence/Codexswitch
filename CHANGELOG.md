@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.0] - 2026-10-18
+
+### Added
+
+- Added per-model reasoning-effort selection in the provider editor, covering `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`, and `persistent`.
+- Applied configured reasoning levels to the managed Codex model catalog and `/v1/models` capability metadata so new models can be configured without code changes.
+
+### Changed
+
+- Preserved custom reasoning selections when refreshing provider models and retained automatic defaults for existing configurations.
+- Added DeepSeek maximum reasoning support across Responses, Chat, and Anthropic Messages, including the desktop `ultra` alias and upstream effort normalization.
+
+### Fixed
+
+- Fixed local authentication configuration mismatches after upgrading from older CodexSwitch versions by synchronizing the managed provider's Bearer token independently of ChatGPT login.
+- Preserved existing local inbound keys, provider credentials, and client login settings during the authentication upgrade.
+- Clarified upgrade-related 401 errors and recovery instructions in Chinese, English, and Japanese.
+
 ## [v0.0.9] - 2026-10-01
 
 ### Added

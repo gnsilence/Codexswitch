@@ -351,6 +351,9 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
     {
         var root = context.RequestRoot;
         var upstreamModel = ProtocolAdapterCommon.ResolveUpstreamModel(context.Provider, context.Model);
+        var requestModel = ResponsesPayloadBuilder.ExtractRequestModel(root);
+        var isDeepSeek = BuiltInModelCatalog.SupportsDeepSeekMaxReasoning(
+            ProtocolAdapterCommon.ResolveEffectiveUpstreamModel(context.Provider, context.Model, requestModel));
         var thinkingConfig = ExtractThinkingConfig(root);
         var toolChoicePlan = ParseToolChoice(root, thinkingConfig.Enabled);
         if (thinkingConfig.Enabled && IsThinkingIncompatibleWithToolChoice(toolChoicePlan))
@@ -394,6 +397,11 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
                     case "max_tokens":
                     case "stop_sequences":
                     case "thinking":
+                        break;
+
+                    case "output_config":
+                        if (!isDeepSeek || !thinkingConfig.Enabled)
+                            property.WriteTo(writer);
                         break;
 
                     case "service_tier":
@@ -505,9 +513,22 @@ public sealed class AnthropicMessagesAdapter : IProviderProtocolAdapter
                 writer.WritePropertyName("thinking");
                 writer.WriteStartObject();
                 writer.WriteString("type", "enabled");
-                writer.WriteNumber("budget_tokens", thinkingConfig.BudgetTokens);
-                writer.WriteString("display", "summarized");
+                if (!isDeepSeek)
+                {
+                    writer.WriteNumber("budget_tokens", thinkingConfig.BudgetTokens);
+                    writer.WriteString("display", "summarized");
+                }
                 writer.WriteEndObject();
+
+                if (isDeepSeek)
+                {
+                    writer.WritePropertyName("output_config");
+                    writer.WriteStartObject();
+                    writer.WriteString("effort", ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
+                        context.Provider, context.Model, requestModel,
+                        TryGetString(root.GetProperty("reasoning"), "effort")));
+                    writer.WriteEndObject();
+                }
             }
 
             if (stopValue.HasValue)

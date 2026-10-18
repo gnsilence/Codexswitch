@@ -10,6 +10,48 @@ namespace CodexSwitch.Tests;
 
 public sealed class OpenAiResponsesAdapterMessagesTests
 {
+    [Theory]
+    [InlineData("max", "max")]
+    [InlineData("ultra", "max")]
+    [InlineData("xhigh", "high")]
+    public async Task HandleMessagesAsync_DeepSeekPreservesOutputConfigEffort(string effort, string expected)
+    {
+        using var request = JsonDocument.Parse($$"""
+            {"model":"local-alias","thinking":{"type":"adaptive"},"output_config":{"effort":"{{effort}}"},
+             "max_tokens":64,"messages":[{"role":"user","content":"hello"}]}
+            """);
+        using var fixture = new AdapterFixture(
+            request, BasicResponsesBody(),
+            modelId: "local-alias",
+            upstreamModel: "deepseek-v4-pro");
+
+        await fixture.InvokeAsync();
+
+        using var upstream = JsonDocument.Parse(Assert.Single(fixture.Handler.Requests).Body);
+        Assert.Equal("enabled", upstream.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+        Assert.Equal(expected, upstream.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        Assert.False(upstream.RootElement.TryGetProperty("output_config", out _));
+    }
+
+    [Fact]
+    public async Task HandleMessagesAsync_DeepSeekDisabledThinkingOverridesMaximumEffort()
+    {
+        using var request = JsonDocument.Parse("""
+            {"model":"local-alias","thinking":{"type":"disabled"},"output_config":{"effort":"max"},
+             "max_tokens":64,"messages":[{"role":"user","content":"hello"}]}
+            """);
+        using var fixture = new AdapterFixture(
+            request, BasicResponsesBody(),
+            modelId: "local-alias",
+            upstreamModel: "deepseek-v4-pro");
+
+        await fixture.InvokeAsync();
+
+        using var upstream = JsonDocument.Parse(Assert.Single(fixture.Handler.Requests).Body);
+        Assert.Equal("disabled", upstream.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+        Assert.False(upstream.RootElement.TryGetProperty("reasoning", out _));
+    }
+
     [Fact]
     public async Task HandleMessagesAsync_Gpt61SolUltraReasoningMapsToUpstreamMax()
     {

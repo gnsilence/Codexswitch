@@ -377,15 +377,14 @@ public static class ResponsesPayloadBuilder
         var requestModel = ExtractRequestModel(root);
         if (root.TryGetProperty("reasoning_effort", out var reasoningEffort) &&
             reasoningEffort.ValueKind == JsonValueKind.String &&
-            string.Equals(reasoningEffort.GetString(), "ultra", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(
+            !string.Equals(
                 ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
                     provider,
                     model,
                     requestModel,
                     reasoningEffort.GetString()),
-                "max",
-                StringComparison.OrdinalIgnoreCase))
+                reasoningEffort.GetString(),
+                StringComparison.Ordinal))
         {
             return true;
         }
@@ -394,15 +393,14 @@ public static class ResponsesPayloadBuilder
             reasoning.ValueKind == JsonValueKind.Object &&
             reasoning.TryGetProperty("effort", out var effort) &&
             effort.ValueKind == JsonValueKind.String &&
-            string.Equals(effort.GetString(), "ultra", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(
+            !string.Equals(
                 ProtocolAdapterCommon.NormalizeReasoningEffortForUpstream(
                     provider,
                     model,
                     requestModel,
                     effort.GetString()),
-                "max",
-                StringComparison.OrdinalIgnoreCase);
+                effort.GetString(),
+                StringComparison.Ordinal);
     }
 
     private static string? ReadStringValue(ReadOnlySpan<byte> value)

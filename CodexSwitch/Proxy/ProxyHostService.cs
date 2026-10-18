@@ -746,6 +746,15 @@ public sealed class ProxyHostService : IAsyncDisposable
     private ModelCapabilities BuildModelCapabilities(ProviderConfig? provider, string modelId)
     {
         var normalized = modelId.ToLowerInvariant();
+        var reasoningModel = normalized;
+        ModelRouteConfig? route = null;
+        if (provider is not null)
+        {
+            route = ProviderRoutingResolver.ResolveModel(provider, modelId);
+            var upstreamModel = ProtocolAdapterCommon.ResolveEffectiveUpstreamModel(provider, route, modelId);
+            if (BuiltInModelCatalog.SupportsDeepSeekMaxReasoning(upstreamModel))
+                reasoningModel = upstreamModel!;
+        }
         var pricing = _priceCalculator.FindPricingRule(modelId);
         var firstInput = pricing?.Input.Tiers.FirstOrDefault()?.PricePerUnit;
         var firstCached = pricing?.CachedInput.Tiers.FirstOrDefault()?.PricePerUnit;
@@ -754,7 +763,12 @@ public sealed class ProxyHostService : IAsyncDisposable
         return new ModelCapabilities
         {
             ContextWindow = provider?.Codex.EnableOneMillionContext == true ? 1_000_000 : 272_000,
-            ReasoningEfforts = ResolveReasoningEfforts(normalized),
+            ReasoningEfforts = route?.SupportedReasoningEfforts is not null
+                ? route.SupportedReasoningEfforts
+                    .Where(ModelReasoningEffortCatalog.IsSupported)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+                : ResolveReasoningEfforts(reasoningModel),
             Vision = normalized.StartsWith("gpt-", StringComparison.Ordinal) ||
                 normalized.StartsWith("claude-", StringComparison.Ordinal) ||
                 normalized.StartsWith("gemini-", StringComparison.Ordinal),
@@ -773,16 +787,7 @@ public sealed class ProxyHostService : IAsyncDisposable
 
     private static string[] ResolveReasoningEfforts(string model)
     {
-        if (model.StartsWith("gpt-6.1", StringComparison.Ordinal) ||
-            model.StartsWith("gpt-6-", StringComparison.Ordinal))
-        {
-            return ["low", "medium", "high", "xhigh", "max", "ultra"];
-        }
-
-        if (model.StartsWith("gpt-", StringComparison.Ordinal))
-            return ["low", "medium", "high", "xhigh"];
-
-        return [];
+        return ModelReasoningEffortCatalog.ResolveLegacy(model).ToArray();
     }
 
     private bool IsAuthorized(HttpContext httpContext)
@@ -808,7 +813,9 @@ public sealed class ProxyHostService : IAsyncDisposable
         return WriteJsonErrorAsync(
             httpContext,
             StatusCodes.Status401Unauthorized,
-            "Invalid CodexSwitch local API key.");
+            "CodexSwitch local authentication configuration mismatch. " +
+            "After upgrading CodexSwitch, sync the managed client configuration and fully quit and restart the client. " +
+            "For unmanaged clients, use the configured local inbound key as a Bearer token.");
     }
 
     private static string? ExtractRequestModel(JsonElement root)

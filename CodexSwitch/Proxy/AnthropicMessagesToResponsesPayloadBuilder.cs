@@ -849,7 +849,13 @@ internal static class AnthropicMessagesToResponsesPayloadBuilder
             writer.WriteStartObject();
             writer.WriteString("type", mode.Enabled ? "enabled" : "disabled");
             writer.WriteEndObject();
-            return;
+            if (!BuiltInModelCatalog.SupportsDeepSeekMaxReasoning(
+                    ProtocolAdapterCommon.ResolveEffectiveUpstreamModel(
+                        context.Provider, context.Model,
+                        ResponsesPayloadBuilder.ExtractRequestModel(context.RequestRoot))))
+            {
+                return;
+            }
         }
 
         if (!mode.Enabled)
@@ -949,11 +955,15 @@ internal static class AnthropicMessagesToResponsesPayloadBuilder
 
     private static ThinkingMode? ExtractThinkingMode(JsonElement root)
     {
+        var outputEffort = root.TryGetProperty("output_config", out var outputConfig) &&
+            outputConfig.ValueKind == JsonValueKind.Object
+                ? TryGetString(outputConfig, "effort")
+                : null;
         if (root.TryGetProperty("thinking", out var thinking) && thinking.ValueKind == JsonValueKind.Object)
         {
             var type = TryGetString(thinking, "type");
             var enabled = !string.Equals(type, "disabled", StringComparison.OrdinalIgnoreCase);
-            return new ThinkingMode(enabled, MapBudgetToEffort(TryGetInt64(thinking, "budget_tokens")));
+            return new ThinkingMode(enabled, outputEffort ?? MapBudgetToEffort(TryGetInt64(thinking, "budget_tokens")));
         }
 
         if (root.TryGetProperty("reasoning", out var reasoning) && reasoning.ValueKind == JsonValueKind.Object)
@@ -967,7 +977,9 @@ internal static class AnthropicMessagesToResponsesPayloadBuilder
                 : new ThinkingMode(true, effort);
         }
 
-        return null;
+        return string.IsNullOrWhiteSpace(outputEffort)
+            ? null
+            : new ThinkingMode(!string.Equals(outputEffort, "none", StringComparison.OrdinalIgnoreCase), outputEffort);
     }
 
     private static string MapBudgetToEffort(long? budgetTokens)

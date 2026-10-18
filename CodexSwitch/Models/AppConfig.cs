@@ -244,6 +244,9 @@ public sealed class ModelRouteConfig
     public string? ServiceTier { get; set; }
 
     public ProviderCostSettings? Cost { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Collection<string>? SupportedReasoningEfforts { get; set; }
 }
 
 public sealed class ModelConversionConfig

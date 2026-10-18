@@ -118,6 +118,10 @@ public sealed class SecurityBaselineTests
             Assert.DoesNotContain("legacy-api", File.ReadAllText(paths.ConfigPath), StringComparison.Ordinal);
             Assert.DoesNotContain("legacy-access", File.ReadAllText(paths.ConfigPath), StringComparison.Ordinal);
             Assert.True(File.Exists(paths.SecretsPath));
+
+            var reloaded = new ConfigurationStore(paths).LoadConfig();
+            Assert.Equal("legacy-inbound", reloaded.Proxy.InboundApiKey);
+            Assert.Equal("legacy-api", reloaded.Providers.Single(item => item.Id == "legacy").ApiKey);
         }
         finally
         {
@@ -170,15 +174,22 @@ public sealed class SecurityBaselineTests
 
             var service = new ConfigurationTransferService(paths);
             var destination = Path.Combine(root, "diagnostics.zip");
-            service.ExportDiagnostics(
-                new AppConfig
+            var config = new AppConfig
+            {
+                Proxy = { InboundApiKey = "inbound-secret", PreserveCodexAppAuth = true },
+                Providers =
                 {
-                    Proxy = { InboundApiKey = "inbound-secret" },
-                    Providers =
-                    {
-                        new ProviderConfig { Id = "provider-a", ApiKey = "provider-secret" }
-                    }
-                },
+                    new ProviderConfig { Id = "provider-a", ApiKey = "provider-secret" }
+                }
+            };
+            Directory.CreateDirectory(paths.CodexDirectory);
+            File.WriteAllText(
+                paths.CodexAuthPath,
+                """{"auth_mode":"chatgpt","tokens":{"access_token":"client-login-secret"}}""");
+            new CodexConfigWriter(paths).Apply(config);
+            Assert.Contains("inbound-secret", File.ReadAllText(paths.CodexConfigPath), StringComparison.Ordinal);
+            service.ExportDiagnostics(
+                config,
                 new ModelPricingCatalog(),
                 new ProxyRuntimeState { IsRunning = true },
                 destination);
@@ -194,6 +205,7 @@ public sealed class SecurityBaselineTests
             Assert.DoesNotContain("inbound-secret", content, StringComparison.Ordinal);
             Assert.DoesNotContain("provider-secret", content, StringComparison.Ordinal);
             Assert.DoesNotContain("log-secret", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("client-login-secret", content, StringComparison.Ordinal);
             Assert.Contains("[redacted]", content, StringComparison.Ordinal);
         }
         finally

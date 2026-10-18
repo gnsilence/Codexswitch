@@ -351,19 +351,22 @@ public static class ProtocolAdapterCommon
         string? requestModel,
         string? reasoningEffort)
     {
+        var upstreamModel = ResolveEffectiveUpstreamModel(provider, model, requestModel);
+        if (BuiltInModelCatalog.SupportsDeepSeekMaxReasoning(upstreamModel))
+            return BuiltInModelCatalog.NormalizeDeepSeekReasoningEffort(reasoningEffort);
+
         if (string.IsNullOrWhiteSpace(reasoningEffort) ||
             !string.Equals(reasoningEffort, "ultra", StringComparison.OrdinalIgnoreCase))
         {
             return reasoningEffort;
         }
 
-        var upstreamModel = ResolveEffectiveUpstreamModel(provider, model, requestModel);
         return IsGpt61SolModel(upstreamModel)
             ? "max"
             : reasoningEffort;
     }
 
-    private static string? ResolveEffectiveUpstreamModel(
+    internal static string? ResolveEffectiveUpstreamModel(
         ProviderConfig provider,
         ModelRouteConfig? model,
         string? requestModel)

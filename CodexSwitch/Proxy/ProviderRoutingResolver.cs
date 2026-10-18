@@ -130,7 +130,8 @@ public static class ProviderRoutingResolver
                 ? upstreamModel
                 : targetRoute.UpstreamModel,
             ServiceTier = targetRoute?.ServiceTier,
-            Cost = targetRoute?.Cost
+            Cost = targetRoute?.Cost,
+            SupportedReasoningEfforts = targetRoute?.SupportedReasoningEfforts
         };
     }
 

@@ -197,6 +197,51 @@ public sealed class ResponsesPayloadBuilderTests
         Assert.Equal("auto", output.RootElement.GetProperty("reasoning").GetProperty("summary").GetString());
     }
 
+    [Theory]
+    [InlineData("deepseek-flash", "max", "max")]
+    [InlineData("deepseek-v4-pro", "max", "max")]
+    [InlineData("deepseek-v4-flash", "ultra", "max")]
+    [InlineData("deepseek-v4-pro", "xhigh", "high")]
+    public void Build_DeepSeekNormalizesReasoningForActualUpstreamModel(string upstreamModel, string effort, string expected)
+    {
+        using var snapshot = ResponsesRequestSnapshot.Parse(
+            $$"""{"model":"local-alias","reasoning":{"effort":"{{effort}}","summary":"auto"},"input":"hello"}""");
+        var provider = new ProviderConfig { DefaultModel = "local-alias" };
+        var model = new ModelRouteConfig { Id = "local-alias", UpstreamModel = upstreamModel };
+
+        var payload = ResponsesPayloadBuilder.Build(snapshot, provider, model, new ProviderCostSettings());
+
+        using var result = JsonDocument.Parse(payload);
+        Assert.Equal(upstreamModel, result.RootElement.GetProperty("model").GetString());
+        Assert.Equal(expected, result.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        Assert.Equal("auto", result.RootElement.GetProperty("reasoning").GetProperty("summary").GetString());
+    }
+
+    [Theory]
+    [InlineData("xhigh", "high", false)]
+    [InlineData("xhigh", "high", true)]
+    [InlineData("medium", "high", false)]
+    [InlineData("medium", "high", true)]
+    [InlineData("ultra", "max", false)]
+    [InlineData("ultra", "max", true)]
+    public void Build_DeepSeekNormalizesNativeRequestWithoutOtherRewrites(string effort, string expected, bool topLevel)
+    {
+        var reasoning = topLevel
+            ? $"\"reasoning_effort\":\"{effort}\""
+            : $"\"reasoning\":{{\"effort\":\"{effort}\"}}";
+        using var snapshot = ResponsesRequestSnapshot.Parse(
+            $"{{\"model\":\"deepseek-v4-pro\",{reasoning},\"input\":\"hello\"}}");
+        var provider = new ProviderConfig { DefaultModel = "deepseek-v4-pro" };
+
+        var payload = ResponsesPayloadBuilder.Build(snapshot, provider, null, new ProviderCostSettings());
+
+        using var result = JsonDocument.Parse(payload);
+        var normalized = topLevel
+            ? result.RootElement.GetProperty("reasoning_effort")
+            : result.RootElement.GetProperty("reasoning").GetProperty("effort");
+        Assert.Equal(expected, normalized.GetString());
+    }
+
     [Fact]
     public void Build_Gpt61SolUltraReasoningEffortMapsToMaxForResponsesUpstream()
     {

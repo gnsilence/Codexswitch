@@ -34,7 +34,10 @@ public sealed class CodexConfigWriter
         "base_url",
         "wire_api",
         "supports_websockets",
-        "requires_openai_auth"
+        "requires_openai_auth",
+        "experimental_bearer_token",
+        "env_key",
+        "env_key_instructions"
     ];
     private static readonly string[] FeaturesManagedKeyOrder =
     [
@@ -199,7 +202,8 @@ public sealed class CodexConfigWriter
         var rootAssignments = CreateRootAssignments(existing, config);
         var providerAssignments = CreateProviderAssignments(
             BuildClientEndpoint(config.Proxy),
-            ShouldEnableWebSockets(config));
+            ShouldEnableWebSockets(config),
+            config.Proxy.InboundApiKey);
         var featureAssignments = CreateFeatureAssignments();
         var windowsAssignments = CreateWindowsAssignments();
 
@@ -249,9 +253,14 @@ public sealed class CodexConfigWriter
     private static Dictionary<string, string?> CreateRootAssignments(string existing, AppConfig config)
     {
         var provider = ResolveActiveCodexProvider(config);
+        var defaultRoute = provider is null
+            ? null
+            : provider.Models.FirstOrDefault(route =>
+                string.Equals(route.Id, provider.DefaultModel, StringComparison.OrdinalIgnoreCase));
         var reasoningEffort = NormalizeReasoningEffort(
             ReadTomlStringAssignment(existing, "model_reasoning_effort"),
-            provider?.DefaultModel);
+            defaultRoute?.UpstreamModel ?? provider?.DefaultModel,
+            defaultRoute?.SupportedReasoningEfforts);
         return new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["model"] = FormatTomlString(
@@ -277,7 +286,8 @@ public sealed class CodexConfigWriter
 
     private static Dictionary<string, string?> CreateProviderAssignments(
         string endpoint,
-        bool supportsWebSockets)
+        bool supportsWebSockets,
+        string inboundApiKey)
     {
         return new Dictionary<string, string?>(StringComparer.Ordinal)
         {
@@ -285,7 +295,12 @@ public sealed class CodexConfigWriter
             ["base_url"] = FormatTomlString(endpoint),
             ["wire_api"] = FormatTomlString("responses"),
             ["supports_websockets"] = supportsWebSockets ? "true" : null,
-            ["requires_openai_auth"] = "true"
+            // Local proxy authentication must not depend on Codex App's ChatGPT login.
+            ["requires_openai_auth"] = "false",
+            ["experimental_bearer_token"] = FormatTomlString(
+                string.IsNullOrWhiteSpace(inboundApiKey) ? DefaultInboundApiKey : inboundApiKey),
+            ["env_key"] = null,
+            ["env_key_instructions"] = null
         };
     }
 
@@ -597,7 +612,9 @@ public sealed class CodexConfigWriter
                 1000 + models.Count,
                 contextWindow,
                 route?.ServiceTier ?? templateModel.ServiceTier ?? provider.ServiceTier,
-                route?.Cost?.FastMode == true || templateModel.FastMode || provider.Cost?.FastMode == true));
+                route?.Cost?.FastMode == true || templateModel.FastMode || provider.Cost?.FastMode == true,
+                route?.SupportedReasoningEfforts,
+                route?.UpstreamModel));
         }
 
         foreach (var route in provider.Models.Where(route => !string.IsNullOrWhiteSpace(route.Id)))
@@ -612,7 +629,9 @@ public sealed class CodexConfigWriter
                 1000 + models.Count,
                 contextWindow,
                 route.ServiceTier ?? provider.ServiceTier,
-                route.Cost?.FastMode == true || provider.Cost?.FastMode == true));
+                route.Cost?.FastMode == true || provider.Cost?.FastMode == true,
+                route.SupportedReasoningEfforts,
+                route.UpstreamModel));
         }
 
         if (models.Count == 0 && !string.IsNullOrWhiteSpace(provider.DefaultModel))
@@ -624,7 +643,13 @@ public sealed class CodexConfigWriter
                 1000,
                 contextWindow,
                 provider.ServiceTier,
-                provider.Cost?.FastMode == true));
+                provider.Cost?.FastMode == true,
+                provider.Models.FirstOrDefault(route =>
+                    string.Equals(route.Id, id, StringComparison.OrdinalIgnoreCase))
+                    ?.SupportedReasoningEfforts,
+                provider.Models.FirstOrDefault(route =>
+                    string.Equals(route.Id, id, StringComparison.OrdinalIgnoreCase))
+                    ?.UpstreamModel));
         }
 
         return new CodexModelCatalog { Models = models };
@@ -657,8 +682,13 @@ public sealed class CodexConfigWriter
         int priority,
         int contextWindow,
         string? serviceTier,
-        bool fastMode)
+        bool fastMode,
+        IReadOnlyCollection<string>? supportedReasoningEfforts = null,
+        string? reasoningModelId = null)
     {
+        var effortModelId = string.IsNullOrWhiteSpace(reasoningModelId) ? id : reasoningModelId;
+        var reasoningEfforts = ResolveReasoningEfforts(effortModelId, supportedReasoningEfforts);
+        var defaultReasoningLevel = ResolveDefaultReasoningLevel(effortModelId, reasoningEfforts);
         return new CodexModelCatalogEntry
         {
             Slug = id,
@@ -666,8 +696,8 @@ public sealed class CodexConfigWriter
             Description = displayName,
             BaseInstructions = "You are Codex, a coding agent. Collaborate with the user and use the available tools to complete the task.",
             ModelMessages = new CodexModelMessages(),
-            DefaultReasoningLevel = "medium",
-            SupportedReasoningLevels = CreateReasoningLevels(id),
+            DefaultReasoningLevel = defaultReasoningLevel,
+            SupportedReasoningLevels = CreateReasoningLevels(reasoningEfforts),
             ShellType = "shell_command",
             Visibility = "list",
             SupportedInApi = true,
@@ -727,9 +757,8 @@ public sealed class CodexConfigWriter
         return null;
     }
 
-    private static List<CodexReasoningLevel> CreateReasoningLevels(string modelId)
+    private static List<CodexReasoningLevel> CreateReasoningLevels(IReadOnlyList<string> efforts)
     {
-        var efforts = ResolveReasoningEfforts(modelId);
         return efforts
             .Select(effort => new CodexReasoningLevel
             {
@@ -742,56 +771,52 @@ public sealed class CodexConfigWriter
                     "xhigh" => "Extra high reasoning depth for complex problems",
                     "max" => "Maximum reasoning depth for the hardest tasks",
                     "ultra" => "Ultra reasoning depth for the most demanding tasks",
+                    "persistent" => "Persistent reasoning mode",
                     _ => "Disable Thinking"
                 }
             })
             .ToList();
     }
 
-    private static IReadOnlyList<string> ResolveReasoningEfforts(string? modelId)
+    internal static IReadOnlyList<string> ResolveReasoningEfforts(
+        string? modelId,
+        IReadOnlyCollection<string>? configuredEfforts = null)
     {
-        if (IsUltraReasoningModel(modelId))
-            return ["low", "medium", "high", "xhigh", "max", "ultra"];
+        if (configuredEfforts is not null)
+        {
+            return configuredEfforts
+                .Where(ModelReasoningEffortCatalog.IsSupported)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
 
-        if (IsMaxReasoningModel(modelId))
-            return ["low", "medium", "high", "xhigh", "max"];
-
-        if (IsXHighReasoningModel(modelId))
-            return ["low", "medium", "high", "xhigh"];
-
-        return ["none", "low", "medium", "high", "xhigh", "max"];
+        return ModelReasoningEffortCatalog.ResolveLegacy(modelId);
     }
 
-    private static bool IsUltraReasoningModel(string? modelId)
+    private static string ResolveDefaultReasoningLevel(string modelId, IReadOnlyList<string> efforts)
     {
-        return !string.IsNullOrWhiteSpace(modelId) &&
-            (modelId.StartsWith("gpt-6-astra", StringComparison.OrdinalIgnoreCase) ||
-             modelId.StartsWith("gpt-6.1-sol", StringComparison.OrdinalIgnoreCase) ||
-             modelId.StartsWith("gpt-6-sol", StringComparison.OrdinalIgnoreCase) ||
-             modelId.StartsWith("gpt-6-luna", StringComparison.OrdinalIgnoreCase) ||
-             modelId.StartsWith("gpt-5.6-sol", StringComparison.OrdinalIgnoreCase) ||
-             modelId.StartsWith("gpt-5.6-terra", StringComparison.OrdinalIgnoreCase));
+        var preferred = BuiltInModelCatalog.SupportsDeepSeekMaxReasoning(modelId) ? "high" : "medium";
+        return efforts.Contains(preferred, StringComparer.OrdinalIgnoreCase)
+            ? preferred
+            : efforts.FirstOrDefault() ?? "none";
     }
 
-    private static bool IsMaxReasoningModel(string? modelId)
-    {
-        return !string.IsNullOrWhiteSpace(modelId) &&
-            modelId.StartsWith("gpt-5.6-luna", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsXHighReasoningModel(string? modelId)
-    {
-        return !string.IsNullOrWhiteSpace(modelId) &&
-            (modelId.StartsWith("gpt-5.5", StringComparison.OrdinalIgnoreCase) ||
-             modelId.StartsWith("gpt-5.4", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string NormalizeReasoningEffort(string? value, string? modelId)
+    private static string NormalizeReasoningEffort(
+        string? value,
+        string? modelId,
+        IReadOnlyCollection<string>? configuredEfforts = null)
     {
         var normalized = value?.Trim().ToLowerInvariant();
-        return ResolveReasoningEfforts(modelId).Contains(normalized ?? "", StringComparer.Ordinal)
+        var isDeepSeek = BuiltInModelCatalog.SupportsDeepSeekMaxReasoning(modelId);
+        var supportedEfforts = ResolveReasoningEfforts(modelId, configuredEfforts);
+        if (supportedEfforts.Contains(normalized ?? "", StringComparer.Ordinal))
+            return normalized!;
+        // Keep the desktop-visible alias; normalize it to max only for upstream requests.
+        if (isDeepSeek && normalized != "ultra")
+            normalized = BuiltInModelCatalog.NormalizeDeepSeekReasoningEffort(normalized);
+        return supportedEfforts.Contains(normalized ?? "", StringComparer.Ordinal)
             ? normalized!
-            : "medium";
+            : ResolveDefaultReasoningLevel(modelId ?? "", supportedEfforts);
     }
 
     private void WriteTextIfChanged(string path, string content, string? existing = null)
